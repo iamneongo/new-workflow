@@ -91,6 +91,32 @@ export function getListenerStatsForAutomation(automationId: string) {
   return { count: 0, lastTime: null };
 }
 
+function emitListenerLog(
+  level: 'info' | 'warn' | 'error' | 'success',
+  message: string,
+  extra?: { automationId?: string; step?: string }
+): void {
+  const payload = {
+    type: 'log',
+    source: 'bot',
+    level,
+    message,
+    ts: Date.now(),
+    automationId: extra?.automationId,
+    step: extra?.step,
+  };
+  sendSseUpdate(payload);
+
+  const prefix = extra?.step ? `[BotListener:${extra.step}]` : '[BotListener]';
+  if (level === 'error') {
+    console.error(prefix, message);
+  } else if (level === 'warn') {
+    console.warn(prefix, message);
+  } else {
+    console.log(prefix, message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Test Bot Token via Telegram Bot API getMe
 // ---------------------------------------------------------------------------
@@ -118,6 +144,7 @@ export async function autoStartFromConfig(): Promise<void> {
 
     const setups = await getActiveAutomationSetups();
     console.log(`[BotListener] Found ${setups.length} active automations to auto-start.`);
+    emitListenerLog('info', `Tự khởi động ${setups.length} automation đang bật.`, { step: 'auto-start' });
     
     global.__activeListeners!.clear();
     
@@ -150,6 +177,10 @@ export async function autoStartFromConfig(): Promise<void> {
           lastForwardTime: setup.lastForwardTime,
         });
         console.log(`[BotListener] Registered auto-start for: ${setup.name} (ID: ${setup.id})`);
+        emitListenerLog('info', `Đã nạp automation "${setup.name}" vào listener.`, {
+          automationId: setup.id,
+          step: 'auto-start',
+        });
       }
     }
 
@@ -159,6 +190,7 @@ export async function autoStartFromConfig(): Promise<void> {
     }
   } catch (err: any) {
     console.error('[BotListener] Auto-start failed:', err.message);
+    emitListenerLog('error', `Auto-start thất bại: ${err.message}`, { step: 'auto-start' });
   }
 }
 
@@ -182,6 +214,7 @@ export function startBotPolling() {
     global.__botPollingOffset = 0;
   }
   console.log('[BotListener] Starting Telegram Bot polling loop...');
+  emitListenerLog('info', 'Bắt đầu Telegram polling loop.', { step: 'polling' });
   
   // Clean up any active webhook first to enable getUpdates polling without conflict
   loadGlobalBotToken().then((token) => {
@@ -203,6 +236,7 @@ export function stopBotPolling() {
     global.__botPollingInterval = null;
   }
   console.log('[BotListener] Stopped Telegram Bot polling loop.');
+  emitListenerLog('warn', 'Đã dừng Telegram polling loop.', { step: 'polling' });
 }
 
 async function pollUpdates() {
@@ -224,6 +258,7 @@ async function pollUpdates() {
     }
   } catch (err: any) {
     console.error('[BotListener] Error in Bot polling:', err.message);
+    emitListenerLog('error', `Polling lỗi: ${err.message}`, { step: 'polling' });
   }
 
   if (global.__botPollingActive) {
@@ -438,6 +473,7 @@ async function handleBotUpdate(update: any) {
     }
   } catch (err: any) {
     console.error('[BotListener] Error handling bot update:', err.message);
+    emitListenerLog('error', `Xử lý update lỗi: ${err.message}`, { step: 'update' });
   }
 }
 
@@ -470,10 +506,23 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
       const chatId = rawChatId.replace(/^-100/, '').replace(/^-/, '');
 
       console.log(`[BotListener] Global Handler received message: "${msg.text}" from chat ID: ${rawChatId} (normalized: ${chatId})`);
+
+      const messageSender = await msg.getSender() as any;
+      if (messageSender?.bot || messageSender?.self || msg.out) {
+        console.log(`[BotListener] Ignoring bot/self-authored message in chat ${chatId}.`);
+        emitListenerLog('info', `Bỏ qua tin nhắn do bot/self gửi trong chat ${chatId}.`, {
+          step: 'filter',
+        });
+        return;
+      }
       
       // Iterate through all active listeners to check if sourceGroupId matches
       for (const listener of global.__activeListeners!.values()) {
         if (listener.normalizedSourceId === chatId) {
+          emitListenerLog('info', `Khớp nhóm nguồn ${chatId}. Kiểm tra topic...`, {
+            automationId: listener.automationId,
+            step: 'match',
+          });
           
           // Check if specific topic thread matches (if topic filtering is configured)
           const msgReplyTo = msg.replyTo as any;
@@ -486,24 +535,39 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
               ? [listener.sourceThreadId]
               : [];
           if (configuredThreadIds.length > 0 && (msgThreadId === null || !configuredThreadIds.includes(msgThreadId))) {
+            emitListenerLog('warn', `Bỏ qua do topic không khớp. Topic nhận được: ${msgThreadId ?? 'root/general'}, topic cấu hình: ${configuredThreadIds.join(', ')}`, {
+              automationId: listener.automationId,
+              step: 'topic-filter',
+            });
             continue; // Thread doesn't match, skip.
           }
 
           console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${msgThreadId})`);
+          emitListenerLog('info', `Nhận tin nhắn trigger từ topic ${msgThreadId ?? 'root/general'}.`, {
+            automationId: listener.automationId,
+            step: 'trigger',
+          });
 
           console.log(`[BotListener] Trigger stage: resolving bot token for ${listener.automationId}`);
+          emitListenerLog('info', 'Đang lấy bot token...', { automationId: listener.automationId, step: 'token' });
           const botToken = global.__globalBotToken || await loadGlobalBotToken();
           if (!botToken) {
             console.warn(`[BotListener] Global bot token is missing. Skipping forward for ${listener.automationId}.`);
+            emitListenerLog('error', 'Thiếu bot token toàn cục, không thể tiếp tục.', {
+              automationId: listener.automationId,
+              step: 'token',
+            });
             continue;
           }
           console.log(`[BotListener] Trigger stage: bot token ready for ${listener.automationId}`);
+          emitListenerLog('info', 'Bot token sẵn sàng.', { automationId: listener.automationId, step: 'token' });
 
           const originalText = msg.text || '';
           const p = getPool();
           
           // Insert into workflow logs
           console.log(`[BotListener] Trigger stage: writing workflow log for ${listener.automationId}`);
+          emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
           const logRes = await p.query(
             `INSERT INTO workflow_logs (automation_id, original_chat_id, original_msg_id, original_text, status)
              VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
@@ -511,17 +575,21 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
           );
           const logId = logRes.rows[0].id;
           console.log(`[BotListener] Trigger stage: workflow log created id=${logId} for ${listener.automationId}`);
+          emitListenerLog('info', `Đã tạo workflow log #${logId}.`, { automationId: listener.automationId, step: 'db' });
 
           let senderName = 'Unknown';
           try {
-            const sender = await msg.getSender() as any;
-            if (sender) {
-              senderName = [sender.firstName, sender.lastName].filter(Boolean).join(' ') || sender.username || sender.title || 'Unknown';
+            if (messageSender) {
+              senderName = [messageSender.firstName, messageSender.lastName].filter(Boolean).join(' ') || messageSender.username || messageSender.title || 'Unknown';
             }
           } catch {}
 
           if (!listener.approvalGroupId) {
             console.warn(`[BotListener] Approval group is not configured for automation: ${listener.automationId}. Skipping message forward.`);
+            emitListenerLog('error', 'Chưa cấu hình nhóm phê duyệt, dừng tại bước trigger.', {
+              automationId: listener.automationId,
+              step: 'approval',
+            });
             
             // Still update stats so the user sees the trigger works
             listener.forwardCount += 1;
@@ -550,6 +618,10 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
 
           // Send approval prompt first so buttons remain attached to the custom message.
           console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
+          emitListenerLog('info', `Đang gửi prompt phê duyệt vào nhóm ${listener.approvalGroupId}...`, {
+            automationId: listener.automationId,
+            step: 'approval',
+          });
           const apprData = await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: listener.approvalGroupId,
             message_thread_id: listener.approvalThreadId || undefined,
@@ -564,6 +636,13 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
             }
           }, 'approval prompt');
           console.log(`[BotListener] Trigger stage: approval response ok=${apprData.ok} for log ${logId}`);
+          emitListenerLog(
+            apprData.ok ? 'info' : 'error',
+            apprData.ok
+              ? `Đã gửi prompt phê duyệt #${logId} thành công.`
+              : `Gửi prompt phê duyệt thất bại: ${apprData.description || 'unknown error'}`,
+            { automationId: listener.automationId, step: 'approval' }
+          );
           if (apprData.ok) {
             await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
           }
@@ -571,6 +650,13 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
           // Send the original message content according to the selected mode.
           const contentMethod = listener.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const contentLabel = listener.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
+          emitListenerLog(
+            'info',
+            listener.approvalMessageMode === 'copy'
+              ? 'Đang copy full nội dung gốc sang nhóm phê duyệt...'
+              : 'Đang forward nội dung gốc sang nhóm phê duyệt...',
+            { automationId: listener.automationId, step: 'content' }
+          );
           const contentData = await sendTelegramMethodWithFallback(baseUrl, contentMethod, {
             chat_id: listener.approvalGroupId,
             message_thread_id: listener.approvalThreadId || undefined,
@@ -578,6 +664,13 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
             message_id: msg.id,
           }, contentLabel);
           console.log(`[BotListener] Trigger stage: ${contentLabel} ok=${contentData.ok} for log ${logId}`);
+          emitListenerLog(
+            contentData.ok ? 'info' : 'error',
+            contentData.ok
+              ? `Đã ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc thành công.`
+              : `Không thể ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
+            { automationId: listener.automationId, step: 'content' }
+          );
 
           // Update local stats
           listener.forwardCount += 1;
@@ -602,6 +695,7 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
       }
     } catch (err: any) {
       console.error('[BotListener] Error in global message handler:', err.message);
+      emitListenerLog('error', `Global message handler lỗi: ${err.message}`, { step: 'handler' });
       sendSseUpdate({ type: 'forwardError', error: err.message });
     }
   };
@@ -610,6 +704,7 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
   global.__globalListenerHandler = handler;
   global.__globalListenerClient = client;
   console.log('[BotListener] Registered global NewMessage handler on Telegram client.');
+  emitListenerLog('info', 'Đã đăng ký handler lắng nghe message mới.', { step: 'handler' });
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +763,7 @@ export async function startListenerForAutomation(automationId: string): Promise<
   startBotPolling();
 
   console.log(`[BotListener] Started listener for automation ID: ${automationId}`);
+  emitListenerLog('success', 'Listener đã được bật.', { automationId, step: 'listener' });
   sendSseUpdate({
     type: 'listenerStarted',
     automationId,
@@ -697,6 +793,10 @@ export async function stopListenerForAutomation(automationId: string): Promise<v
   }
 
   console.log(`[BotListener] Stopped listener for automation ID: ${automationId}`);
+  emitListenerLog('warn', `Đã dừng listener cho automation ${automationId}.`, {
+    automationId,
+    step: 'listener',
+  });
   sendSseUpdate({
     type: 'listenerStopped',
     automationId,

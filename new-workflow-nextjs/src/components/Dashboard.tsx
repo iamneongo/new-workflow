@@ -10,6 +10,18 @@ import BotConfigPanel from './BotConfigPanel';
 
 type ConnectionStatus = 'connecting' | 'online' | 'offline';
 
+type LogLevel = 'info' | 'warn' | 'error' | 'success';
+
+interface RuntimeLogEntry {
+  id: string;
+  ts: number;
+  level: LogLevel;
+  source: string;
+  message: string;
+  step?: string;
+  automationId?: string;
+}
+
 interface ListenerState {
   active: boolean;
   count: number;
@@ -31,6 +43,7 @@ export default function Dashboard() {
 
   // Track listener states for each automation setup ID
   const [listenerStates, setListenerStates] = useState<Record<string, ListenerState>>({});
+  const [runtimeLogs, setRuntimeLogs] = useState<RuntimeLogEntry[]>([]);
 
   // Rename modal state (legacy forum topic rename, can keep intact)
   const [renameModal, setRenameModal] = useState<{
@@ -47,6 +60,24 @@ export default function Dashboard() {
   }>({ isOpen: false, field: null });
 
   const [isBotConfigOpen, setIsBotConfigOpen] = useState(false);
+
+  const pushRuntimeLog = useCallback((entry: Omit<RuntimeLogEntry, 'id' | 'ts'> & { ts?: number }) => {
+    setRuntimeLogs((prev) => {
+      const next = [
+        {
+          id: `${entry.source}-${entry.step || 'general'}-${entry.ts || Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          ts: entry.ts || Date.now(),
+          level: entry.level,
+          source: entry.source,
+          message: entry.message,
+          step: entry.step,
+          automationId: entry.automationId,
+        },
+        ...prev,
+      ];
+      return next.slice(0, 80);
+    });
+  }, []);
 
   // 1. Fetch all custom automations
   const fetchAutomations = useCallback(async () => {
@@ -136,8 +167,14 @@ export default function Dashboard() {
   useEffect(() => {
     const source = new EventSource('/api/stream');
 
-    source.onopen = () => setConnectionStatus('online');
-    source.onerror = () => setConnectionStatus('offline');
+    source.onopen = () => {
+      setConnectionStatus('online');
+      pushRuntimeLog({ level: 'success', source: 'sse', message: 'Kết nối stream real-time đã mở.' });
+    };
+    source.onerror = () => {
+      setConnectionStatus('offline');
+      pushRuntimeLog({ level: 'error', source: 'sse', message: 'Mất kết nối stream real-time.' });
+    };
 
     source.onmessage = (event) => {
       try {
@@ -145,21 +182,27 @@ export default function Dashboard() {
 
         if (data.type === 'syncStart') {
           setIsSyncing(true);
+          pushRuntimeLog({ level: 'info', source: 'sync', message: 'Bắt đầu đồng bộ dữ liệu.' });
         } else if (data.type === 'syncComplete') {
           setIsSyncing(false);
           fetchChats();
+          pushRuntimeLog({ level: 'success', source: 'sync', message: 'Đồng bộ dữ liệu hoàn tất.' });
         } else if (data.type === 'syncError') {
           setIsSyncing(false);
           alert(`Lỗi đồng bộ: ${data.error}`);
+          pushRuntimeLog({ level: 'error', source: 'sync', message: data.error || 'Đồng bộ lỗi.' });
         } else if (data.type === 'update') {
           setChats((prev) => ({ ...prev, [data.chat.chatId]: data.chat }));
         } else if (data.type === 'authRequired') {
           setAuthModal({ isOpen: true, field: data.field });
+          pushRuntimeLog({ level: 'warn', source: 'auth', message: `Cần xác thực bước ${data.field}.` });
         } else if (data.type === 'connected') {
           setConnectionStatus('online');
           setAuthModal({ isOpen: false, field: null });
+          pushRuntimeLog({ level: 'success', source: 'telegram', message: 'Telegram client đã kết nối.' });
         } else if (data.type === 'authError') {
           alert(`Lỗi xác thực: ${data.message}`);
+          pushRuntimeLog({ level: 'error', source: 'auth', message: data.message || 'Lỗi xác thực.' });
         } else if (data.type === 'listenerStarted') {
           const aid = data.automationId;
           if (aid) {
@@ -171,6 +214,7 @@ export default function Dashboard() {
               },
             }));
             fetchAutomations();
+            pushRuntimeLog({ level: 'success', source: 'listener', automationId: aid, message: 'Listener đã bật.' });
           }
         } else if (data.type === 'listenerStopped') {
           const aid = data.automationId;
@@ -183,6 +227,7 @@ export default function Dashboard() {
               },
             }));
             fetchAutomations();
+            pushRuntimeLog({ level: 'warn', source: 'listener', automationId: aid, message: 'Listener đã dừng.' });
           }
         } else if (data.type === 'messageForwarded') {
           const aid = data.automationId;
@@ -196,9 +241,25 @@ export default function Dashboard() {
                 lastPreview: data.preview,
               },
             }));
+            pushRuntimeLog({
+              level: 'success',
+              source: 'bot',
+              automationId: aid,
+              message: `Đã xử lý tin nhắn. Tổng: ${data.count}.`,
+            });
           }
         } else if (data.type === 'forwardError') {
           console.error('[SSE] Forward error:', data.error);
+          pushRuntimeLog({ level: 'error', source: 'bot', message: data.error || 'Forward error.' });
+        } else if (data.type === 'log') {
+          pushRuntimeLog({
+            level: data.level || 'info',
+            source: data.source || 'runtime',
+            automationId: data.automationId,
+            step: data.step,
+            message: data.message || JSON.stringify(data),
+            ts: data.ts,
+          });
         }
       } catch (e) {
         // ignore parse errors
@@ -206,7 +267,7 @@ export default function Dashboard() {
     };
 
     return () => source.close();
-  }, [fetchChats, fetchAutomations]);
+  }, [fetchChats, fetchAutomations, pushRuntimeLog]);
 
   // Initial load
   useEffect(() => {
@@ -435,6 +496,60 @@ export default function Dashboard() {
       </header>
 
       {/* Main */}
+      <section className="runtime-log-section" style={{ padding: '0 24px 12px 24px' }}>
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', background: 'rgba(2, 6, 23, 0.6)', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <i className="fa-solid fa-wave-square" />
+              <strong style={{ fontSize: '13px' }}>Runtime Log</strong>
+              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Nhìn ngay bottleneck / lỗi</span>
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setRuntimeLogs([])}
+              style={{ padding: '4px 8px', fontSize: '11px' }}
+            >
+              Xóa log
+            </button>
+          </div>
+
+          <div style={{ maxHeight: '220px', overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {runtimeLogs.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                Chưa có log mới. Khi bạn bấm lưu/bật listener/gửi tin nhắn, log sẽ hiện ở đây.
+              </div>
+            ) : (
+              runtimeLogs.map((entry) => {
+                const color =
+                  entry.level === 'error'
+                    ? '#ef4444'
+                    : entry.level === 'warn'
+                    ? '#f59e0b'
+                    : entry.level === 'success'
+                    ? '#10b981'
+                    : '#38bdf8';
+                return (
+                  <div key={entry.id} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', fontSize: '12px', lineHeight: 1.45 }}>
+                    <span style={{ minWidth: '86px', color: 'var(--color-text-muted)', fontFamily: 'monospace' }}>
+                      {new Date(entry.ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                    <span style={{ minWidth: '64px', color, fontWeight: 700, textTransform: 'uppercase' }}>
+                      {entry.level}
+                    </span>
+                    <span style={{ minWidth: '76px', color: 'var(--color-text-muted)' }}>
+                      {entry.source}{entry.step ? ` / ${entry.step}` : ''}
+                    </span>
+                    <span style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {entry.message}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </section>
+
       <main className="app-main">
         {/* Left sidebar */}
         <section className="sidebar-section">

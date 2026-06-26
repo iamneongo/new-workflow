@@ -59,6 +59,20 @@ export function sendSseUpdate(data: object): void {
   }
 }
 
+function emitRuntimeLog(
+  level: 'info' | 'warn' | 'error' | 'success',
+  source: string,
+  message: string
+): void {
+  sendSseUpdate({
+    type: 'log',
+    level,
+    source,
+    message,
+    ts: Date.now(),
+  });
+}
+
 /**
  * Returns a promise that resolves when the user supplies the requested value.
  * Used for interactive auth via the /api/auth endpoint.
@@ -184,6 +198,7 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
 
   global.__isSyncing = true;
   sendSseUpdate({ type: 'syncStart' });
+  emitRuntimeLog('info', 'sync', 'Bắt đầu đồng bộ dữ liệu Telegram.');
   console.log('[Sync] Bắt đầu đồng bộ hóa...');
 
   try {
@@ -192,6 +207,7 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
 
     const dialogs = await client.getDialogs({});
     console.log(`[Sync] Tìm thấy ${dialogs.length} cuộc hội thoại.`);
+    emitRuntimeLog('info', 'sync', `Tìm thấy ${dialogs.length} cuộc hội thoại.`);
 
     for (const dialog of dialogs) {
       const entity = dialog.entity as any;
@@ -278,10 +294,12 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
     await saveDatabase(db);
     console.log('[Sync] Hoàn tất, đã lưu database.');
     sendSseUpdate({ type: 'syncComplete' });
+    emitRuntimeLog('success', 'sync', 'Đồng bộ dữ liệu hoàn tất.');
     return { success: true };
   } catch (error: any) {
     console.error('[Sync] Lỗi:', error);
     sendSseUpdate({ type: 'syncError', error: error.message });
+    emitRuntimeLog('error', 'sync', `Đồng bộ lỗi: ${error.message}`);
     return { success: false, error: error.message };
   } finally {
     global.__isSyncing = false;
