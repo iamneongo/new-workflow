@@ -2,18 +2,32 @@ import { Pool } from 'pg';
 
 let pool: Pool | null = null;
 
+function shouldUseSsl(connectionString: string): boolean {
+  try {
+    const host = new URL(connectionString).hostname.toLowerCase();
+    return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
+  } catch {
+    return true;
+  }
+}
+
 export function getPool(): Pool {
   if (!pool) {
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
       throw new Error('DATABASE_URL is not defined in environment variables.');
     }
-    pool = new Pool({
+    const config: ConstructorParameters<typeof Pool>[0] = {
       connectionString,
-      ssl: {
+    };
+
+    if (shouldUseSsl(connectionString)) {
+      config.ssl = {
         rejectUnauthorized: false,
-      },
-    });
+      };
+    }
+
+    pool = new Pool(config);
   }
   return pool;
 }
@@ -33,7 +47,25 @@ export function normalizeThreadId(value: unknown): number | null {
 
 export type ApprovalMessageMode = 'forward' | 'copy';
 
+export type SupplierRouteMode = 'forward' | 'copy';
+
+export type FinalMessageMode = 'forward' | 'copy';
+
+export type SupplyChangeMessageMode = 'forward' | 'copy';
+
+export interface SupplierRoute {
+  id: string;
+  name: string;
+  groupId: string;
+  threadId: number | null;
+  messageMode: SupplierRouteMode;
+}
+
 export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMode {
+  return value === 'copy' ? 'copy' : 'forward';
+}
+
+export function normalizeSupplierRouteMode(value: unknown): SupplierRouteMode {
   return value === 'copy' ? 'copy' : 'forward';
 }
 
@@ -79,6 +111,41 @@ function readStoredThreadIds(threadIdsValue: unknown, legacyThreadId: unknown): 
   return legacy !== null ? [legacy] : [];
 }
 
+export function normalizeSupplierRoutes(value: unknown): SupplierRoute[] {
+  if (value === null || value === undefined || value === '') {
+    return [];
+  }
+
+  let rawValues: unknown[] = [];
+  if (Array.isArray(value)) {
+    rawValues = value;
+  } else if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      rawValues = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      rawValues = [];
+    }
+  } else {
+    rawValues = [value];
+  }
+
+  return rawValues
+    .map((item: any, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const groupId = typeof item.groupId === 'string' ? item.groupId.trim() : '';
+      if (!groupId) return null;
+      return {
+        id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `supplier_${index + 1}`,
+        name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `Nhà cung ứng ${index + 1}`,
+        groupId,
+        threadId: normalizeThreadId(item.threadId),
+        messageMode: normalizeSupplierRouteMode(item.messageMode),
+      } satisfies SupplierRoute;
+    })
+    .filter((item): item is SupplierRoute => item !== null);
+}
+
 export interface TopicEntry {
   threadId: number;
   topicName: string;
@@ -109,8 +176,13 @@ export interface AutomationSetup {
   approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplyChangeGroupId: string;
+  supplyChangeThreadId: number | null;
+  supplyChangeMessageMode: SupplyChangeMessageMode;
+  supplierRoutes: SupplierRoute[];
   deliveryGroupId: string;
   deliveryThreadId: number | null;
+  finalMessageMode: FinalMessageMode;
   finalGroupId: string;
   finalThreadId: number | null;
   rejectGroupId: string;
@@ -164,8 +236,24 @@ export async function ensureDatabase(): Promise<void> {
         bot_token VARCHAR(255),
         source_group_id VARCHAR(100),
         source_thread_ids INTEGER[],
+        source_thread_id INTEGER,
+        approval_group_id VARCHAR(100),
+        approval_thread_id INTEGER,
         approval_message_mode VARCHAR(20),
         approval_custom_message TEXT,
+        supply_group_id VARCHAR(100),
+        supply_thread_id INTEGER,
+        supply_change_group_id VARCHAR(100),
+        supply_change_thread_id INTEGER,
+        supply_change_message_mode VARCHAR(20),
+        supplier_routes JSONB,
+        delivery_group_id VARCHAR(100),
+        delivery_thread_id INTEGER,
+        final_message_mode VARCHAR(20),
+        final_group_id VARCHAR(100),
+        final_thread_id INTEGER,
+        reject_group_id VARCHAR(100),
+        reject_thread_id INTEGER,
         dest_group_id VARCHAR(100),
         is_listening BOOLEAN DEFAULT FALSE NOT NULL,
         forward_count INTEGER DEFAULT 0 NOT NULL,
@@ -183,8 +271,13 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_custom_message TEXT',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_group_id VARCHAR(100)',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_message_mode VARCHAR(20)',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supplier_routes JSONB',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS delivery_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS delivery_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_message_mode VARCHAR(20)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_group_id VARCHAR(100)',
@@ -207,6 +300,24 @@ export async function ensureDatabase(): Promise<void> {
       WHERE approval_message_mode IS NULL OR approval_custom_message IS NULL
     `, [DEFAULT_APPROVAL_CUSTOM_MESSAGE]);
 
+    await client.query(`
+      UPDATE automation_setups
+      SET supplier_routes = COALESCE(supplier_routes, '[]'::jsonb)
+      WHERE supplier_routes IS NULL
+    `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET supply_change_message_mode = COALESCE(supply_change_message_mode, 'forward')
+      WHERE supply_change_message_mode IS NULL
+    `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET final_message_mode = COALESCE(final_message_mode, 'forward')
+      WHERE final_message_mode IS NULL
+    `);
+
     // Create workflow_logs table
     await client.query(`
       CREATE TABLE IF NOT EXISTS workflow_logs (
@@ -218,10 +329,27 @@ export async function ensureDatabase(): Promise<void> {
         original_media_label VARCHAR(100),
         approval_msg_id INTEGER,
         supply_msg_id INTEGER,
+        supplier_selection_msg_id INTEGER,
+        supply_change_msg_id INTEGER,
+        supplier_route_id VARCHAR(100),
+        selected_supplier_group_id VARCHAR(100),
+        selected_supplier_thread_id INTEGER,
         delivery_msg_id INTEGER,
         status VARCHAR(50) DEFAULT 'pending'
       );
     `);
+
+    const workflowLogAlterQueries = [
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supplier_selection_msg_id INTEGER',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supply_change_msg_id INTEGER',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supplier_route_id VARCHAR(100)',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS selected_supplier_group_id VARCHAR(100)',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS selected_supplier_thread_id INTEGER',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS delivery_group_id VARCHAR(100)',
+    ];
+    for (const q of workflowLogAlterQueries) {
+      await client.query(q);
+    }
 
     // Create global_settings table
     await client.query(`
@@ -378,8 +506,13 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   supplyGroupId: '',
   supplyThreadId: null,
+  supplyChangeGroupId: '',
+  supplyChangeThreadId: null,
+  supplyChangeMessageMode: 'forward',
+  supplierRoutes: [],
   deliveryGroupId: '',
   deliveryThreadId: null,
+  finalMessageMode: 'forward',
   finalGroupId: '',
   finalThreadId: null,
   rejectGroupId: '',
@@ -414,8 +547,13 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplyChangeGroupId: row.supply_change_group_id || '',
+        supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
+        supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',
+        supplierRoutes: normalizeSupplierRoutes(row.supplier_routes),
         deliveryGroupId: row.delivery_group_id || '',
         deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
+        finalMessageMode: row.final_message_mode === 'copy' ? 'copy' : 'forward',
         finalGroupId: row.final_group_id || '',
         finalThreadId: normalizeThreadId(row.final_thread_id),
         rejectGroupId: row.reject_group_id || '',
@@ -457,8 +595,13 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
       supplyGroupId: row.supply_group_id || '',
       supplyThreadId: normalizeThreadId(row.supply_thread_id),
+      supplyChangeGroupId: row.supply_change_group_id || '',
+      supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
+      supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',
+      supplierRoutes: normalizeSupplierRoutes(row.supplier_routes),
       deliveryGroupId: row.delivery_group_id || '',
       deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
+      finalMessageMode: row.final_message_mode === 'copy' ? 'copy' : 'forward',
       finalGroupId: row.final_group_id || '',
       finalThreadId: normalizeThreadId(row.final_thread_id),
       rejectGroupId: row.reject_group_id || '',
@@ -500,9 +643,20 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       approvalCustomMessage: hasField('approvalCustomMessage')
         ? (typeof setup.approvalCustomMessage === 'string' ? setup.approvalCustomMessage : String(setup.approvalCustomMessage ?? ''))
         : current.approvalCustomMessage,
+      supplierRoutes: hasField('supplierRoutes')
+        ? normalizeSupplierRoutes(setup.supplierRoutes)
+        : current.supplierRoutes,
       approvalThreadId: hasField('approvalThreadId') ? normalizeThreadId(setup.approvalThreadId) : current.approvalThreadId,
       supplyThreadId: hasField('supplyThreadId') ? normalizeThreadId(setup.supplyThreadId) : current.supplyThreadId,
+      supplyChangeGroupId: hasField('supplyChangeGroupId') ? (typeof setup.supplyChangeGroupId === 'string' ? setup.supplyChangeGroupId : String(setup.supplyChangeGroupId ?? '')) : current.supplyChangeGroupId,
+      supplyChangeThreadId: hasField('supplyChangeThreadId') ? normalizeThreadId(setup.supplyChangeThreadId) : current.supplyChangeThreadId,
+      supplyChangeMessageMode: hasField('supplyChangeMessageMode')
+        ? (setup.supplyChangeMessageMode === 'copy' ? 'copy' : 'forward')
+        : current.supplyChangeMessageMode,
       deliveryThreadId: hasField('deliveryThreadId') ? normalizeThreadId(setup.deliveryThreadId) : current.deliveryThreadId,
+      finalMessageMode: hasField('finalMessageMode')
+        ? (setup.finalMessageMode === 'copy' ? 'copy' : 'forward')
+        : current.finalMessageMode,
       finalThreadId: hasField('finalThreadId') ? normalizeThreadId(setup.finalThreadId) : current.finalThreadId,
       rejectThreadId: hasField('rejectThreadId') ? normalizeThreadId(setup.rejectThreadId) : current.rejectThreadId,
     };
@@ -511,13 +665,13 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         INSERT INTO automation_setups (
         id, name, source_group_id, source_thread_id, source_thread_ids,
         approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message,
-        supply_group_id, supply_thread_id,
-        delivery_group_id, delivery_thread_id,
+        supply_group_id, supply_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
+        delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
@@ -529,8 +683,13 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         approval_custom_message = EXCLUDED.approval_custom_message,
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
+        supply_change_group_id = EXCLUDED.supply_change_group_id,
+        supply_change_thread_id = EXCLUDED.supply_change_thread_id,
+        supply_change_message_mode = EXCLUDED.supply_change_message_mode,
+        supplier_routes = EXCLUDED.supplier_routes,
         delivery_group_id = EXCLUDED.delivery_group_id,
         delivery_thread_id = EXCLUDED.delivery_thread_id,
+        final_message_mode = EXCLUDED.final_message_mode,
         final_group_id = EXCLUDED.final_group_id,
         final_thread_id = EXCLUDED.final_thread_id,
         reject_group_id = EXCLUDED.reject_group_id,
@@ -551,8 +710,13 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.approvalCustomMessage,
       updated.supplyGroupId,
       updated.supplyThreadId,
+      updated.supplyChangeGroupId,
+      updated.supplyChangeThreadId,
+      updated.supplyChangeMessageMode,
+      JSON.stringify(updated.supplierRoutes),
       updated.deliveryGroupId,
       updated.deliveryThreadId,
+      updated.finalMessageMode,
       updated.finalGroupId,
       updated.finalThreadId,
       updated.rejectGroupId,
@@ -608,8 +772,13 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplyChangeGroupId: row.supply_change_group_id || '',
+        supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
+        supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',
+        supplierRoutes: normalizeSupplierRoutes(row.supplier_routes),
         deliveryGroupId: row.delivery_group_id || '',
         deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
+        finalMessageMode: row.final_message_mode === 'copy' ? 'copy' : 'forward',
         finalGroupId: row.final_group_id || '',
         finalThreadId: normalizeThreadId(row.final_thread_id),
         rejectGroupId: row.reject_group_id || '',

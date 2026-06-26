@@ -105,6 +105,52 @@ export function isPendingAuth(field: 'phone' | 'code' | 'password'): boolean {
 }
 
 /**
+ * Logs out the current Telegram session, clears in-memory state, and removes the saved session file.
+ */
+export async function logoutTelegramClient(): Promise<void> {
+  const client = global.__telegramClient;
+
+  try {
+    if (client) {
+      try {
+        await client.destroy();
+      } catch (err: any) {
+        console.warn('[Telegram Logout] Client destroy failed:', err?.message || err);
+      }
+    }
+  } finally {
+    global.__telegramClient = undefined;
+    global.__telegramConnected = false;
+    global.__telegramInitializing = undefined;
+    global.__isSyncing = false;
+    global.__authResolvers = {};
+
+    try {
+      const botListener = await import('./bot-listener');
+      botListener.stopBotPolling();
+    } catch (err: any) {
+      console.warn('[Telegram Logout] Failed to stop bot polling:', err?.message || err);
+    }
+
+    try {
+      (global as any).__activeListeners?.clear?.();
+    } catch {
+      // ignore
+    }
+
+    try {
+      await fs.unlink(sessionFilePath);
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        console.warn('[Telegram Logout] Failed to remove session file:', err?.message || err);
+      }
+    }
+
+    sendSseUpdate({ type: 'loggedOut' });
+  }
+}
+
+/**
  * Initialises and returns the singleton TelegramClient.
  * On first call, starts the client (authenticating if needed).
  */
@@ -176,7 +222,7 @@ async function _initTelegramClient(): Promise<TelegramClient> {
   console.log('[Telegram] Đã kết nối thành công!');
   sendSseUpdate({ type: 'connected' });
 
-  // Auto start/resume bot listener if configured in database
+  // Auto start/resume bot polling if configured in database
   import('./bot-listener')
     .then(({ autoStartFromConfig }) => {
       autoStartFromConfig();

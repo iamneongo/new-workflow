@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveAuthInput, getTelegramClient, syncTelegramData, isSyncing } from '@/lib/telegram';
+import { resolveAuthInput, getTelegramClient, syncTelegramData, isSyncing, logoutTelegramClient } from '@/lib/telegram';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/auth
- * Body: { action: 'connect' | 'phone' | 'code' | 'password', value?: string }
+ * Body: { action: 'connect' | 'logout' | 'phone' | 'code' | 'password', value?: string }
  *
  * - 'connect': Starts the Telegram client (triggers auth flow if no session)
+ * - 'logout': Destroys the current Telegram session and clears local state
  * - 'phone' | 'code' | 'password': Provides the requested auth value
  */
 export async function POST(req: NextRequest) {
@@ -28,6 +29,11 @@ export async function POST(req: NextRequest) {
         });
 
       return NextResponse.json({ success: true, message: 'Đang kết nối Telegram...' });
+    }
+
+    if (action === 'logout') {
+      await logoutTelegramClient();
+      return NextResponse.json({ success: true, message: 'Đã đăng xuất Telegram.' });
     }
 
     if (action === 'phone' || action === 'code' || action === 'password') {

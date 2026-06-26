@@ -7,6 +7,7 @@ import ChatDetails from './ChatDetails';
 import RenameModal from './RenameModal';
 import AuthModal from './AuthModal';
 import BotConfigPanel from './BotConfigPanel';
+import AppTour from './AppTour';
 
 type ConnectionStatus = 'connecting' | 'online' | 'offline';
 
@@ -28,6 +29,8 @@ interface ListenerState {
   lastTime: number | null;
   lastPreview: string | null;
 }
+
+type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
 export default function Dashboard() {
   const [chats, setChats] = useState<Record<string, ChatEntry>>({});
@@ -59,7 +62,28 @@ export default function Dashboard() {
     field: 'phone' | 'code' | 'password' | null;
   }>({ isOpen: false, field: null });
 
+  const [createAutomationModal, setCreateAutomationModal] = useState<{
+    isOpen: boolean;
+    name: string;
+  }>({ isOpen: false, name: '' });
+
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmText: string;
+    onConfirm: (() => void | Promise<void>) | null;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Xóa',
+    onConfirm: null,
+  });
+
   const [isBotConfigOpen, setIsBotConfigOpen] = useState(false);
+  const [isRuntimeLogOpen, setIsRuntimeLogOpen] = useState(false);
+  const [activeWorkflowNode, setActiveWorkflowNode] = useState<WorkflowNodeKey | null>(null);
 
   const pushRuntimeLog = useCallback((entry: Omit<RuntimeLogEntry, 'id' | 'ts'> & { ts?: number }) => {
     setRuntimeLogs((prev) => {
@@ -78,6 +102,9 @@ export default function Dashboard() {
       return next.slice(0, 80);
     });
   }, []);
+
+  const latestRuntimeLog = runtimeLogs[0] || null;
+  const runtimeLogCount = runtimeLogs.length;
 
   // 1. Fetch all custom automations
   const fetchAutomations = useCallback(async () => {
@@ -299,7 +326,16 @@ export default function Dashboard() {
   };
 
   // Create new automation setup
+  const openCreateAutomationModal = () => {
+    setCreateAutomationModal({
+      isOpen: true,
+      name: `Automation mới ${automations.length + 1}`,
+    });
+  };
+
   const handleCreateAutomation = async () => {
+    const name = createAutomationModal.name.trim();
+    if (!name) return;
     const newId = `auto_${Date.now()}`;
     try {
       const res = await fetch('/api/automations', {
@@ -307,10 +343,11 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: newId,
-          name: 'Automation mới ' + (automations.length + 1),
+          name,
         }),
       });
       if (res.ok) {
+        setCreateAutomationModal({ isOpen: false, name: '' });
         await fetchAutomations();
         setSelectedAutomationId(newId);
         setDetailsTab('config');
@@ -323,7 +360,7 @@ export default function Dashboard() {
   };
 
   // Save automation settings
-  const handleSaveAutomation = async (setup: Partial<AutomationSetup> & { id: string }) => {
+  const handleSaveAutomation = async (setup: Partial<AutomationSetup> & { id: string; restartIfListening?: boolean }) => {
     const res = await fetch('/api/automations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -355,9 +392,47 @@ export default function Dashboard() {
     }
   };
 
+  const requestDeleteConfirm = (options: {
+    title: string;
+    message: string;
+    confirmText?: string;
+    onConfirm: () => void | Promise<void>;
+  }) => {
+    setDeleteConfirmModal({
+      isOpen: true,
+      title: options.title,
+      message: options.message,
+      confirmText: options.confirmText || 'Xóa',
+      onConfirm: options.onConfirm,
+    });
+  };
+
   // Click "Cấu hình Bot" button in header
   const handleHeaderBotConfigClick = () => {
     setIsBotConfigOpen(true);
+  };
+
+  const handleLogout = async () => {
+    const confirmed = window.confirm('Bạn có chắc chắn muốn đăng xuất Telegram account hiện tại?');
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'logout' }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Đăng xuất thất bại');
+        return;
+      }
+
+      window.location.reload();
+    } catch {
+      alert('Lỗi kết nối khi đăng xuất');
+    }
   };
 
   // Rename modal handlers (legacy topic rename)
@@ -438,12 +513,12 @@ export default function Dashboard() {
     <div className="app-container">
       {/* Header */}
       <header className="app-header">
-        <div className="logo-area">
+        <div className="logo-area" id="appBrand">
           <div className="logo-icon">
             <i className="fa-brands fa-telegram" />
           </div>
           <div className="logo-text">
-            <h1>Telegram Userbot Tracker</h1>
+            <h1>Telegram Bot Tracker</h1>
             <p>Giám sát nhóm &amp; chủ đề tự động 100%</p>
           </div>
         </div>
@@ -459,6 +534,13 @@ export default function Dashboard() {
             Cấu hình Bot
           </button>
 
+          <AppTour
+            selectedAutomationId={selectedAutomationId}
+            hasAutomations={automations.length > 0}
+            isLoading={isLoading}
+            activeWorkflowNode={activeWorkflowNode}
+          />
+
           <button
             className="btn btn-primary"
             id="btnSync"
@@ -467,6 +549,16 @@ export default function Dashboard() {
           >
             <i className={`fa-solid fa-rotate${isSyncing ? ' fa-spin' : ''}`} />
             {isSyncing ? ' Đang đồng bộ...' : ' Đồng bộ ngay'}
+          </button>
+
+          <button
+            className="btn btn-secondary"
+            id="btnLogout"
+            onClick={handleLogout}
+            style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
+          >
+            <i className="fa-solid fa-right-from-bracket" />
+            Đăng xuất
           </button>
 
           {anyListenerActive && (
@@ -496,59 +588,134 @@ export default function Dashboard() {
       </header>
 
       {/* Main */}
-      <section className="runtime-log-section" style={{ padding: '0 24px 12px 24px' }}>
-        <div style={{ border: '1px solid var(--border-color)', borderRadius: '12px', background: 'rgba(2, 6, 23, 0.6)', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <i className="fa-solid fa-wave-square" />
-              <strong style={{ fontSize: '13px' }}>Runtime Log</strong>
-              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Nhìn ngay bottleneck / lỗi</span>
-            </div>
-            <button
-              className="btn btn-secondary"
-              onClick={() => setRuntimeLogs([])}
-              style={{ padding: '4px 8px', fontSize: '11px' }}
+      {isRuntimeLogOpen ? (
+        <section className="runtime-log-section" id="runtimeLogSection" style={{ padding: '0 24px 12px 24px' }}>
+          <div
+            style={{
+              border: '1px solid #e7e1d8',
+              borderRadius: '16px',
+              background: '#fbfaf7',
+              overflow: 'hidden',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                padding: '12px 16px',
+                borderBottom: '1px solid #e9e3da',
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248,246,241,0.95))',
+              }}
             >
-              Xóa log
-            </button>
-          </div>
-
-          <div style={{ maxHeight: '220px', overflowY: 'auto', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {runtimeLogs.length === 0 ? (
-              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                Chưa có log mới. Khi bạn bấm lưu/bật listener/gửi tin nhắn, log sẽ hiện ở đây.
-              </div>
-            ) : (
-              runtimeLogs.map((entry) => {
-                const color =
-                  entry.level === 'error'
-                    ? '#ef4444'
-                    : entry.level === 'warn'
-                    ? '#f59e0b'
-                    : entry.level === 'success'
-                    ? '#10b981'
-                    : '#38bdf8';
-                return (
-                  <div key={entry.id} style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', fontSize: '12px', lineHeight: 1.45 }}>
-                    <span style={{ minWidth: '86px', color: 'var(--color-text-muted)', fontFamily: 'monospace' }}>
-                      {new Date(entry.ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </span>
-                    <span style={{ minWidth: '64px', color, fontWeight: 700, textTransform: 'uppercase' }}>
-                      {entry.level}
-                    </span>
-                    <span style={{ minWidth: '76px', color: 'var(--color-text-muted)' }}>
-                      {entry.source}{entry.step ? ` / ${entry.step}` : ''}
-                    </span>
-                    <span style={{ color: 'var(--color-text)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {entry.message}
-                    </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '999px', background: '#f3efe8', color: '#4b5563' }}>
+                  <i className="fa-solid fa-wave-square" />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: '13px', color: '#1f2937' }}>Runtime Log</strong>
+                    <span style={{ fontSize: '11px', color: '#6b7280' }}>Theo dõi bottleneck, lỗi và nhịp xử lý</span>
                   </div>
-                );
-              })
-            )}
+                  <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+                    {runtimeLogCount === 0 ? 'Chưa có log mới' : `${runtimeLogCount} bản ghi gần nhất`}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setIsRuntimeLogOpen(false)}
+                  style={{ padding: '4px 10px', fontSize: '11px', background: '#fff', borderColor: '#ddd6cb', color: '#374151' }}
+                >
+                  Đóng
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setRuntimeLogs([])}
+                  style={{ padding: '4px 10px', fontSize: '11px', background: '#fff', borderColor: '#ddd6cb', color: '#374151' }}
+                >
+                  Xóa log
+                </button>
+              </div>
+            </div>
+
+            <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '8px', background: '#fbfaf7' }}>
+              {runtimeLogs.length === 0 ? (
+                <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                  Chưa có log mới. Khi bạn bấm lưu/bật listener/gửi tin nhắn, log sẽ hiện ở đây.
+                </div>
+              ) : (
+                runtimeLogs.map((entry) => {
+                  const tone =
+                    entry.level === 'error'
+                      ? { bg: '#fef2f2', border: '#fecaca', color: '#b91c1c', label: 'ERROR' }
+                      : entry.level === 'warn'
+                      ? { bg: '#fffbeb', border: '#fde68a', color: '#b45309', label: 'WARN' }
+                      : entry.level === 'success'
+                      ? { bg: '#ecfdf5', border: '#a7f3d0', color: '#047857', label: 'SUCCESS' }
+                      : { bg: '#eff6ff', border: '#bfdbfe', color: '#2563eb', label: 'INFO' };
+                  return (
+                    <div
+                      key={entry.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '92px 76px 130px 1fr',
+                        gap: '10px',
+                        alignItems: 'start',
+                        padding: '10px 12px',
+                        border: `1px solid ${tone.border}`,
+                        borderRadius: '12px',
+                        background: tone.bg,
+                      }}
+                    >
+                      <span style={{ color: '#6b7280', fontFamily: 'monospace', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                        {new Date(entry.ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      </span>
+                      <span style={{ display: 'inline-flex', justifyContent: 'center', padding: '4px 8px', borderRadius: '999px', background: '#fff', border: `1px solid ${tone.border}`, color: tone.color, fontWeight: 700, textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.03em' }}>
+                        {tone.label}
+                      </span>
+                      <span style={{ color: '#6b7280', fontSize: '11px' }}>
+                        {entry.source}{entry.step ? ` / ${entry.step}` : ''}
+                      </span>
+                      <span style={{ color: '#1f2937', fontSize: '12px', lineHeight: 1.5, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                        {entry.message}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
+        </section>
+      ) : (
+        <div style={{ padding: '0 24px 10px 24px' }}>
+          <button
+            type="button"
+            id="runtimeLogToggle"
+            className="btn btn-secondary"
+            onClick={() => setIsRuntimeLogOpen(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 10px',
+              borderRadius: '999px',
+              border: '1px dashed #ddd6cb',
+              background: '#fbfaf7',
+              color: '#374151',
+              fontSize: '12px',
+              boxShadow: 'none',
+              width: 'fit-content',
+            }}
+          >
+            <i className="fa-solid fa-wave-square" />
+            Mở runtime log
+          </button>
         </div>
-      </section>
+      )}
 
       <main className="app-main">
         {/* Left sidebar */}
@@ -568,7 +735,7 @@ export default function Dashboard() {
                 setSelectedAutomationId(id);
                 setDetailsTab('config');
               }}
-              onCreateAutomation={handleCreateAutomation}
+              onCreateAutomation={openCreateAutomationModal}
               chats={chats}
             />
           )}
@@ -579,6 +746,7 @@ export default function Dashboard() {
           <ChatDetails
             automation={selectedAutomation}
             onDeleteAutomation={handleDeleteAutomation}
+            onRequestDeleteConfirm={requestDeleteConfirm}
             onSaveAutomation={handleSaveAutomation}
             chats={chats}
             activeTab={detailsTab}
@@ -598,9 +766,68 @@ export default function Dashboard() {
             }}
             onListenerChange={fetchActiveListeners}
             onRename={openRenameModal}
+            onActiveNodeChange={setActiveWorkflowNode}
           />
         </section>
       </main>
+
+      {createAutomationModal.isOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80, padding: '20px' }}>
+          <div style={{ width: '100%', maxWidth: '420px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '14px', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.18)', padding: '18px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>Tạo automation mới</h3>
+            <p style={{ margin: '8px 0 14px', fontSize: '13px', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
+              Nhập tên để tạo một luồng mới. Tên này sẽ hiện trong danh sách bên trái.
+            </p>
+            <input
+              value={createAutomationModal.name}
+              onChange={(e) => setCreateAutomationModal((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Ví dụ: Automation công trình A"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void handleCreateAutomation();
+                }
+              }}
+              style={{ width: '100%', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '10px 12px', fontSize: '14px', outline: 'none' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button type="button" onClick={() => setCreateAutomationModal({ isOpen: false, name: '' })} style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer' }}>
+                Hủy
+              </button>
+              <button type="button" onClick={() => void handleCreateAutomation()} style={{ border: 'none', background: 'var(--accent-blue)', color: '#fff', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontWeight: 600 }}>
+                Tạo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirmModal.isOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 85, padding: '20px' }}>
+          <div style={{ width: '100%', maxWidth: '460px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '14px', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.18)', padding: '18px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>{deleteConfirmModal.title}</h3>
+            <p style={{ margin: '8px 0 0', fontSize: '13px', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>{deleteConfirmModal.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button type="button" onClick={() => setDeleteConfirmModal({ isOpen: false, title: '', message: '', confirmText: 'Xóa', onConfirm: null })} style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer' }}>
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const action = deleteConfirmModal.onConfirm;
+                  setDeleteConfirmModal({ isOpen: false, title: '', message: '', confirmText: 'Xóa', onConfirm: null });
+                  if (action) {
+                    await action();
+                  }
+                }}
+                style={{ border: 'none', background: '#ef4444', color: '#fff', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                {deleteConfirmModal.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rename Modal */}
       <RenameModal

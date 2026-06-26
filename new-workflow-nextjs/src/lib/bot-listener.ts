@@ -1,30 +1,27 @@
 /**
  * bot-listener.ts
  *
- * Manages a GramJS NewMessage event handler that:
- *  1. Listens to all new messages in selected source groups/topics.
- *  2. Initiates a multi-step interactive workflow using inline buttons:
- *     - Step 2: Approval Group/Topic (2 buttons: Agree / Disagree)
- *     - Step 3: Supply Option Group/Topic (3 buttons: Agree Supply / Disagree Supply / Change Request)
- *     - Step 4: Delivery Group/Topic (Awaits reply)
- *     - Step 5: Final Acceptance Group/Topic (Notifies completion)
- *     - Reject Branch: Sends reject notifications to configured group/topic.
+ * Telegram Bot API long-polling listener that:
+ *  1. Listens to new group/topic messages through getUpdates.
+ *  2. Handles inline button callbacks and reply-based workflow steps.
+ *  3. Uses GramJS only for login/session sync and Telegram metadata sync.
  *
  * All state is kept in Node.js `global` so it survives Next.js hot-reloads.
  */
 
-import { NewMessage, NewMessageEvent } from 'telegram/events/index.js';
-import { Api } from 'telegram';
 import FormData from 'form-data';
 import { getTelegramClient, sendSseUpdate } from './telegram';
 import { 
   loadAutomationSetup, 
-  saveAutomationSetup, 
-  getActiveAutomationSetups, 
-  loadGlobalBotToken, 
+  saveAutomationSetup,
+  getActiveAutomationSetups,
+  loadGlobalBotToken,
+  loadDatabase,
   getPool,
   normalizeThreadId,
   ApprovalMessageMode,
+  FinalMessageMode,
+  SupplierRoute,
   DEFAULT_APPROVAL_CUSTOM_MESSAGE,
 } from './database';
 
@@ -44,8 +41,10 @@ export interface ActiveListener {
   approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplierRoutes: SupplierRoute[];
   deliveryGroupId: string;
   deliveryThreadId: number | null;
+  finalMessageMode: FinalMessageMode;
   finalGroupId: string;
   finalThreadId: number | null;
   rejectGroupId: string;
@@ -58,10 +57,6 @@ declare global {
   // eslint-disable-next-line no-var
   var __activeListeners: Map<string, ActiveListener> | undefined;
   // eslint-disable-next-line no-var
-  var __globalListenerHandler: ((event: NewMessageEvent) => Promise<void>) | undefined;
-  // eslint-disable-next-line no-var
-  var __globalListenerClient: any | undefined;
-  // eslint-disable-next-line no-var
   var __globalBotToken: string | undefined;
   // eslint-disable-next-line no-var
   var __botPollingInterval: NodeJS.Timeout | null | undefined;
@@ -69,11 +64,33 @@ declare global {
   var __botPollingActive: boolean | undefined;
   // eslint-disable-next-line no-var
   var __botPollingOffset: number | undefined;
+  // eslint-disable-next-line no-var
+  var __processingCallbackActions: Set<string> | undefined;
 }
 
 // Initialize active listeners Map if not present
 if (!global.__activeListeners) {
   global.__activeListeners = new Map();
+}
+if (!global.__processingCallbackActions) {
+  global.__processingCallbackActions = new Set();
+}
+
+function removeLegacyGramjsListenerIfAny(): void {
+  const legacyHandler = (global as any).__globalListenerHandler;
+  const legacyClient = (global as any).__globalListenerClient;
+
+  if (!legacyHandler || !legacyClient) return;
+
+  try {
+    legacyClient.removeEventHandler(legacyHandler);
+    console.log('[BotListener] Removed legacy GramJS message handler.');
+  } catch (err: any) {
+    console.warn('[BotListener] Failed to remove legacy GramJS handler:', err?.message || err);
+  } finally {
+    (global as any).__globalListenerHandler = undefined;
+    (global as any).__globalListenerClient = undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +155,8 @@ export async function testBotToken(token: string): Promise<{ ok: boolean; userna
 // ---------------------------------------------------------------------------
 export async function autoStartFromConfig(): Promise<void> {
   try {
+    removeLegacyGramjsListenerIfAny();
+
     // Cache the global bot token
     const globalToken = await loadGlobalBotToken();
     global.__globalBotToken = globalToken;
@@ -167,8 +186,10 @@ export async function autoStartFromConfig(): Promise<void> {
           approvalCustomMessage: setup.approvalCustomMessage,
           supplyGroupId: setup.supplyGroupId,
           supplyThreadId: setup.supplyThreadId,
+          supplierRoutes: setup.supplierRoutes,
           deliveryGroupId: setup.deliveryGroupId,
           deliveryThreadId: setup.deliveryThreadId,
+          finalMessageMode: setup.finalMessageMode,
           finalGroupId: setup.finalGroupId,
           finalThreadId: setup.finalThreadId,
           rejectGroupId: setup.rejectGroupId,
@@ -185,7 +206,6 @@ export async function autoStartFromConfig(): Promise<void> {
     }
 
     if (global.__activeListeners!.size > 0) {
-      await ensureGlobalHandlerRegistered();
       startBotPolling();
     }
   } catch (err: any) {
@@ -253,7 +273,10 @@ async function pollUpdates() {
     if (data.ok && data.result.length > 0) {
       for (const update of data.result) {
         global.__botPollingOffset = update.update_id + 1;
-        await handleBotUpdate(update);
+        void handleBotUpdate(update).catch((err: any) => {
+          console.error('[BotListener] Unhandled update error:', err?.message || err);
+          emitListenerLog('error', `Unhandled update error: ${err?.message || err}`, { step: 'update' });
+        });
       }
     }
   } catch (err: any) {
@@ -267,9 +290,14 @@ async function pollUpdates() {
 }
 
 async function handleBotUpdate(update: any) {
+  let callbackFailureReporter: ((bodyText: string, label: string) => Promise<void>) | null = null;
   try {
     const p = getPool();
     const token = global.__globalBotToken || await loadGlobalBotToken();
+    if (!token) {
+      emitListenerLog('error', 'Thiếu bot token khi xử lý update.', { step: 'update' });
+      return;
+    }
     const baseUrl = `https://api.telegram.org/bot${token}`;
 
     // 1. Callback query handler
@@ -290,86 +318,298 @@ async function handleBotUpdate(update: any) {
       if (parts.length < 2) return;
       const action = parts[0];
       const logId = Number(parts[1]);
+      const actionKey = `${logId}:${action}`;
+      if (global.__processingCallbackActions!.has(actionKey)) {
+        return;
+      }
+      global.__processingCallbackActions!.add(actionKey);
 
-      const logRes = await p.query('SELECT * FROM workflow_logs WHERE id = $1', [logId]);
-      if (logRes.rows.length === 0) return;
-      const log = logRes.rows[0];
+      const callbackChatId = cq.message?.chat?.id;
+      const callbackMessageId = cq.message?.message_id;
+      const originalCleanText = cq.message?.text || cq.message?.caption || '';
+      const updateCallbackStatus = async (bodyText: string, label: string) => {
+        if (!callbackChatId || !callbackMessageId) return;
+        await editTelegramMessageWithFallback(baseUrl, {
+          chat_id: callbackChatId,
+          message_id: callbackMessageId,
+          text: `${originalCleanText}\n\n${bodyText}`,
+          reply_markup: { inline_keyboard: [] },
+        }, label);
+      };
+      callbackFailureReporter = updateCallbackStatus;
+      try {
+        if (callbackChatId && callbackMessageId) {
+          await updateCallbackStatus('⏳ Đang xử lý lựa chọn...', 'callback ack');
+        }
 
-      const autoSetup = await loadAutomationSetup(log.automation_id);
-      if (!autoSetup) return;
-
-      const originalCleanText = cq.message.text || '';
-
-      if (action === 'appr_agree') {
-        if (log.status !== 'pending') return;
-
-        await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
-
-        await fetch(`${baseUrl}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            text: `${originalCleanText}\n\n✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi ${userFullName}`,
-          }),
-        });
-
-        // Send to Step 3 (Supply Group)
-        if (!autoSetup.supplyGroupId) {
-          console.warn(`[BotListener] Supply group is not configured for automation: ${log.automation_id}. Cannot send supply prompt.`);
+        const logRes = await p.query('SELECT * FROM workflow_logs WHERE id = $1', [logId]);
+        if (logRes.rows.length === 0) {
+          await updateCallbackStatus('❌ Không tìm thấy workflow log để xử lý.', 'callback missing log');
           return;
         }
-        const supplyText = `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`;
-        const supplyData = await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: autoSetup.supplyGroupId,
-          message_thread_id: autoSetup.supplyThreadId || undefined,
-          text: supplyText,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '✅ Đồng ý cấp vật tư', callback_data: `supply_agree:${logId}` },
-              ],
-              [
-                { text: '❌ Không đồng ý cấp vật tư', callback_data: `supply_reject:${logId}` },
-                { text: '🔄 Yêu cầu thay đổi vật tư', callback_data: `supply_change:${logId}` },
-              ]
-            ]
+        const log = logRes.rows[0];
+
+        const autoSetup = await loadAutomationSetup(log.automation_id);
+        if (!autoSetup) {
+          await updateCallbackStatus('❌ Không tìm thấy cấu hình automation.', 'callback missing automation');
+          return;
+        }
+
+        if (action === 'appr_agree') {
+          if (log.status !== 'pending') {
+            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale approval');
+            return;
           }
-        }, 'supply prompt');
-        if (supplyData.ok) {
-          await p.query("UPDATE workflow_logs SET supply_msg_id = $1, status = 'supply_sent' WHERE id = $2", [supplyData.result.message_id, logId]);
-        }
 
-      } else if (action === 'appr_disagree') {
-        if (log.status !== 'pending') return;
+          await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
 
-        await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
+          await fetch(`${baseUrl}/editMessageText`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: cq.message.chat.id,
+              message_id: cq.message.message_id,
+              text: `${originalCleanText}\n\n✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi ${userFullName}`,
+            }),
+          });
 
-        await fetch(`${baseUrl}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            text: `${originalCleanText}\n\n❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi ${userFullName}`,
-          }),
+          const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
+          const isCtMessage = isSupplierRoutingMessage(log.original_text || '');
+          emitListenerLog('info', `Kiểm tra luồng CT: ${isCtMessage ? 'khớp' : 'không khớp'} - ${explainSupplierRoutingMatch(log.original_text || '')}`, {
+            automationId: log.automation_id,
+            step: 'supplier-select',
+          });
+
+          if (isCtMessage && supplierRoutes.length > 0) {
+            await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
+
+            const selectionText = `🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`;
+            emitListenerLog('info', `CT message: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
+              automationId: log.automation_id,
+              step: 'supplier-select',
+            });
+            const selectionData = await sendTelegramMessageWithFallback(baseUrl, {
+              chat_id: cq.message.chat.id,
+              message_thread_id: cq.message.message_thread_id || autoSetup.approvalThreadId || undefined,
+              text: selectionText,
+              reply_markup: {
+                inline_keyboard: supplierRoutes.map((route) => ([
+                  { text: route.name, callback_data: `supplier_select:${logId}:${route.id}` },
+                ])),
+              }
+            }, 'supplier selection prompt');
+
+            if (selectionData.ok) {
+              await p.query(
+                "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
+                [selectionData.result.message_id, logId]
+              );
+            }
+            return;
+          }
+
+          if (isCtMessage) {
+            emitListenerLog('warn', 'Tin CT không có nhà cung ứng cấu hình hợp lệ, không thể mở nhánh supplier.', {
+              automationId: log.automation_id,
+              step: 'supplier-select',
+            });
+            await updateCallbackStatus('❌ Chưa cấu hình nhà cung ứng cho tin CT này.', 'callback missing supplier route');
+          } else {
+            emitListenerLog('info', 'Tin nhắn không phải CT vật tư, dừng ở bước phê duyệt và không đi sang supplier.', {
+              automationId: log.automation_id,
+              step: 'supplier-select',
+            });
+            await updateCallbackStatus(`ℹ️ Tin này không thuộc flow CT nên bot dừng ở bước phê duyệt.\n${explainSupplierRoutingMatch(log.original_text || '')}`, 'callback non-ct approval');
+          }
+          return;
+
+        } else if (action === 'appr_disagree') {
+          if (log.status !== 'pending') {
+            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale reject');
+            return;
+          }
+
+          await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
+
+          await fetch(`${baseUrl}/editMessageText`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: cq.message.chat.id,
+              message_id: cq.message.message_id,
+              text: `${originalCleanText}\n\n❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi ${userFullName}`,
+            }),
+          });
+
+          // Send reject notification
+          if (!autoSetup.rejectGroupId) {
+            console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject notification.`);
+            await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo từ chối.', 'callback reject missing group');
+            return;
+          }
+          const rejectText = `❌ *THÔNG BÁO TỪ CHỐI PHÊ DUYỆT*\n\nYêu cầu vật tư đã bị từ chối phê duyệt bởi ${userFullName}.\nNội dung: ${log.original_text || '[Media]'}`;
+          await sendTelegramMessageWithFallback(baseUrl, {
+            chat_id: autoSetup.rejectGroupId,
+            message_thread_id: autoSetup.rejectThreadId || undefined,
+            text: rejectText,
+          }, 'reject notice');
+
+        } else if (action === 'supplier_select') {
+          if (parts.length < 3) {
+            await updateCallbackStatus('❌ Thiếu thông tin nhà cung ứng đã chọn.', 'callback missing supplier id');
+            return;
+          }
+          const routeId = parts[2];
+          const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
+          const selectedRoute = supplierRoutes.find((route) => route.id === routeId);
+          if (!selectedRoute) {
+            await updateCallbackStatus('❌ Nhà cung ứng đã chọn không còn hợp lệ.', 'callback invalid supplier');
+            return;
+          }
+
+          if (!isSupplierRoutingMessage(log.original_text || '')) {
+            await updateCallbackStatus('⚠️ Nội dung gốc không phải CT vật tư nên bot không mở nhánh supplier.', 'callback non-ct supplier');
+            return;
+          }
+
+          emitListenerLog('info', `Đã chọn nhà cung ứng "${selectedRoute.name}".`, {
+            automationId: log.automation_id,
+            step: 'supplier-select',
+          });
+
+          emitListenerLog('info', `Đang gửi tới supplier ${selectedRoute.name} (chat_id=${selectedRoute.groupId}${selectedRoute.threadId !== null ? `, topic=${selectedRoute.threadId}` : ''}).`, {
+            automationId: log.automation_id,
+            step: 'supplier-select',
+          });
+
+          if (callbackChatId && callbackMessageId) {
+            await editTelegramMessageWithFallback(baseUrl, {
+              chat_id: callbackChatId,
+              message_id: callbackMessageId,
+              text: `${originalCleanText}\n\n⏳ Đã chọn ${selectedRoute.name}, đang chuyển nội dung...`,
+              reply_markup: { inline_keyboard: [] },
+            }, 'supplier ack');
+          }
+
+          void (async () => {
+          const supplyText = `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`;
+          const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
+            chat_id: selectedRoute.groupId,
+            message_thread_id: selectedRoute.threadId || undefined,
+            text: supplyText,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✅ Đồng ý cấp vật tư', callback_data: `supply_agree:${logId}` },
+                ],
+                [
+                  { text: '❌ Không đồng ý cấp vật tư', callback_data: `supply_reject:${logId}` },
+                  { text: '🔄 Yêu cầu thay đổi vật tư', callback_data: `supply_change:${logId}` },
+                ]
+              ]
+            }
+          }, `supplier route ${selectedRoute.name}`);
+
+          const sendMethod: 'forwardMessage' | 'copyMessage' = selectedRoute.messageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          const contentPromise = sendTelegramMethodWithFallback(baseUrl, sendMethod, {
+            chat_id: selectedRoute.groupId,
+            message_thread_id: selectedRoute.threadId || undefined,
+            from_chat_id: log.original_chat_id,
+            message_id: log.original_msg_id,
+          }, `supplier route content ${selectedRoute.name}`);
+
+          const [promptData, contentData] = await Promise.all([promptPromise, contentPromise]);
+
+          if (!promptData.ok) {
+            const promptError = promptData.description || 'unknown error';
+            const promptHint = /chat not found/i.test(promptError)
+              ? 'Bot chưa được thêm vào nhóm/kênh đích hoặc chat_id đang sai.'
+              : '';
+            emitListenerLog('error', `Không gửi được prompt nhà cung ứng "${selectedRoute.name}" tới chat ${selectedRoute.groupId}: ${promptData.description || 'unknown error'}`, {
+              automationId: log.automation_id,
+              step: 'supplier-select',
+            });
+            if (callbackChatId && callbackMessageId) {
+              await editTelegramMessageWithFallback(baseUrl, {
+                chat_id: callbackChatId,
+                message_id: callbackMessageId,
+                text: `${originalCleanText}\n\n❌ Không gửi được prompt đến ${selectedRoute.name}.${promptHint ? `\n${promptHint}` : ''}`,
+                reply_markup: { inline_keyboard: [] },
+              }, 'supplier prompt fail');
+            }
+            return;
+          }
+
+          await p.query(
+            `UPDATE workflow_logs
+             SET status = 'supply_sent',
+                 supply_msg_id = $1,
+                 supplier_route_id = $2,
+                 selected_supplier_group_id = $3,
+                 selected_supplier_thread_id = $4
+             WHERE id = $5`,
+            [
+              promptData.result.message_id,
+              selectedRoute.id,
+              selectedRoute.groupId,
+              selectedRoute.threadId,
+              logId,
+            ]
+          );
+
+          if (!contentData.ok) {
+            const contentError = contentData.description || 'unknown error';
+            const contentHint = /chat not found/i.test(contentError)
+              ? 'Bot chưa được thêm vào nhóm/kênh đích hoặc chat_id đang sai.'
+              : '';
+            emitListenerLog('error', `Không chuyển được nội dung sang ${selectedRoute.name}: ${contentData.description || 'unknown error'}`, {
+              automationId: log.automation_id,
+              step: 'supplier-select',
+            });
+            if (callbackChatId && callbackMessageId) {
+              await editTelegramMessageWithFallback(baseUrl, {
+                chat_id: callbackChatId,
+                message_id: callbackMessageId,
+                text: `${originalCleanText}\n\n⚠️ Đã chọn ${selectedRoute.name}, nhưng chưa chuyển được nội dung.${contentHint ? `\n${contentHint}` : ''}`,
+                reply_markup: { inline_keyboard: [] },
+              }, 'supplier content fail');
+            }
+            return;
+          }
+
+          if (callbackChatId && callbackMessageId) {
+            await editTelegramMessageWithFallback(baseUrl, {
+              chat_id: callbackChatId,
+              message_id: callbackMessageId,
+              text: `${originalCleanText}\n\n✅ *ĐÃ CHỌN NHÀ CUNG ỨNG:* ${selectedRoute.name}`,
+              reply_markup: { inline_keyboard: [] },
+            }, 'supplier final ack');
+          }
+        })().catch((err: any) => {
+          emitListenerLog('error', `Xử lý nhà cung ứng "${selectedRoute.name}" lỗi: ${err.message}`, {
+            automationId: log.automation_id,
+            step: 'supplier-select',
+          });
+          void updateCallbackStatus(`❌ Xử lý nhà cung ứng lỗi: ${err.message}`, 'supplier error ack');
         });
 
-        // Send reject notification
-        if (!autoSetup.rejectGroupId) {
-          console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject notification.`);
-          return;
-        }
-        const rejectText = `❌ *THÔNG BÁO TỪ CHỐI PHÊ DUYỆT*\n\nYêu cầu vật tư đã bị từ chối phê duyệt bởi ${userFullName}.\nNội dung: ${log.original_text || '[Media]'}`;
-        await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: autoSetup.rejectGroupId,
-          message_thread_id: autoSetup.rejectThreadId || undefined,
-          text: rejectText,
-        }, 'reject notice');
+        return;
 
       } else if (action === 'supply_agree') {
-        if (log.status !== 'supply_sent') return;
+        if (log.status !== 'supply_sent') {
+          await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale supply agree');
+          return;
+        }
+
+        const expectedSupplyGroupId = log.selected_supplier_group_id || autoSetup.supplyGroupId;
+        if (expectedSupplyGroupId) {
+          const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
+          const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
+          if (normExpected !== normActual) {
+            await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply agree mismatch');
+            return;
+          }
+        }
 
         await p.query("UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1", [logId]);
 
@@ -386,6 +626,7 @@ async function handleBotUpdate(update: any) {
         // Send message to delivery group
         if (!autoSetup.deliveryGroupId) {
           console.warn(`[BotListener] Delivery group is not configured for automation: ${log.automation_id}. Cannot send delivery notification.`);
+          await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
         const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.\n👉 *YÊU CẦU:* Khi nhận được vật tư, vui lòng *REPLY* trực tiếp vào tin nhắn này để nghiệm thu.`;
@@ -395,11 +636,36 @@ async function handleBotUpdate(update: any) {
           text: deliveryText,
         }, 'delivery notice');
         if (deliveryData.ok) {
-          await p.query("UPDATE workflow_logs SET delivery_msg_id = $1 WHERE id = $2", [deliveryData.result.message_id, logId]);
+          await p.query(
+            "UPDATE workflow_logs SET delivery_msg_id = $1, delivery_group_id = $2 WHERE id = $3",
+            [deliveryData.result.message_id, normalizeComparableChatId(autoSetup.deliveryGroupId), logId]
+          );
+          emitListenerLog('success', `Đã gửi thông báo giao nhận vật tư #${deliveryData.result.message_id}.`, {
+            automationId: log.automation_id,
+            step: 'delivery',
+          });
+        } else {
+          emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
+            automationId: log.automation_id,
+            step: 'delivery',
+          });
         }
 
       } else if (action === 'supply_reject' || action === 'supply_change') {
-        if (log.status !== 'supply_sent') return;
+        if (log.status !== 'supply_sent') {
+          await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale supply decision');
+          return;
+        }
+
+        const expectedSupplyGroupId = log.selected_supplier_group_id || autoSetup.supplyGroupId;
+        if (expectedSupplyGroupId) {
+          const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
+          const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
+          if (normExpected !== normActual) {
+            await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply decision mismatch');
+            return;
+          }
+        }
 
         const isChange = action === 'supply_change';
         const newStatus = isChange ? 'supply_changed' : 'supply_rejected';
@@ -417,25 +683,51 @@ async function handleBotUpdate(update: any) {
           }),
         });
 
-        // Send reject notification
-        if (!autoSetup.rejectGroupId) {
-          console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject/change notification.`);
+        const changeRequestGroupId = autoSetup.supplyChangeGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId;
+        const changeRequestThreadId = autoSetup.supplyChangeThreadId || log.selected_supplier_thread_id || autoSetup.supplyThreadId || undefined;
+        if (isChange && !changeRequestGroupId) {
+          console.warn(`[BotListener] Change request group is not configured for automation: ${log.automation_id}. Cannot send change request notice.`);
+          await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo thay đổi vật tư.', 'callback missing change group');
           return;
         }
-        const rejectText = `${isChange ? '🔄' : '❌'} *THÔNG BÁO TỪ CHỐI/YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: ${isChange ? 'Yêu cầu thay đổi vật tư' : 'Từ chối cung cấp vật tư'} bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
-        await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: autoSetup.rejectGroupId,
-          message_thread_id: autoSetup.rejectThreadId || undefined,
+
+        // Send reject/change notification
+        if (!isChange && !autoSetup.rejectGroupId) {
+          console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject notification.`);
+          await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo từ chối.', 'callback missing reject group');
+          return;
+        }
+        const rejectText = isChange
+          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 *Hãy REPLY trực tiếp vào tin nhắn này.* Bot sẽ chuyển nội dung phản hồi sang group đã cấu hình để mọi người cùng biết nhà cung ứng muốn thay đổi gì.`
+          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
+        const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
+          chat_id: isChange ? changeRequestGroupId : autoSetup.rejectGroupId,
+          message_thread_id: isChange ? changeRequestThreadId : (autoSetup.rejectThreadId || undefined),
           text: rejectText,
         }, 'reject/change notice');
+        if (isChange && rejectData.ok) {
+          await p.query("UPDATE workflow_logs SET supply_change_msg_id = $1 WHERE id = $2", [rejectData.result.message_id, logId]);
+        }
+      }
+      } finally {
+        global.__processingCallbackActions!.delete(actionKey);
       }
     }
 
-    // 2. Reply to delivery message handler
+    // 2. New message trigger handler
+    if (update.message) {
+      await handleBotMessageTrigger(update.message, p, token);
+    }
+
+    // 3. Reply to delivery message handler
     if (update.message && update.message.reply_to_message) {
       const msg = update.message;
       const replyToMsgId = msg.reply_to_message.message_id;
       const chatId = msg.chat.id.toString();
+
+      emitListenerLog('info', `Nhận reply trong group ${chatId} tới message #${replyToMsgId}.`, {
+        step: 'delivery-reply',
+      });
 
       // Find log waiting for delivery reply
       const logRes = await p.query(
@@ -448,263 +740,340 @@ async function handleBotUpdate(update: any) {
           if (!autoSetup) continue;
 
           // Verify chat ID
-          const normLogGroup = autoSetup.deliveryGroupId.replace(/^-100/, '');
-          const normChatId = chatId.replace(/^-100/, '');
-          if (normLogGroup !== normChatId) continue;
+          const normLogGroup = normalizeComparableChatId(log.delivery_group_id || autoSetup.deliveryGroupId);
+          const normChatId = normalizeComparableChatId(chatId);
+          if (normLogGroup !== normChatId) {
+            emitListenerLog('warn', `Bỏ qua reply delivery do chat không khớp. Reply chat=${chatId}, config=${autoSetup.deliveryGroupId}.`, {
+              automationId: log.automation_id,
+              step: 'delivery-reply',
+            });
+            continue;
+          }
 
           await p.query("UPDATE workflow_logs SET status = 'completed' WHERE id = $1", [log.id]);
 
           const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
           const replyText = msg.text || '';
-
-          const finalMessage = `✅ *NGHIỆM THU VẬT TƯ HOÀN TẤT*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được nghiệm thu thành công bởi *${senderFullName}*\nPhản hồi: "${replyText}"`;
           if (!autoSetup.finalGroupId) {
             console.warn(`[BotListener] Final group is not configured for automation: ${log.automation_id}. Cannot send acceptance completion notification.`);
+            emitListenerLog('error', `Chưa cấu hình nhóm nghiệm thu cuối cho automation ${log.automation_id}.`, {
+              automationId: log.automation_id,
+              step: 'delivery-reply',
+            });
             continue;
           }
+
+          await sendTelegramMessageWithFallback(baseUrl, {
+            chat_id: msg.chat.id,
+            message_thread_id: msg.message_thread_id || undefined,
+            reply_to_message_id: msg.message_id,
+            text: '✅ Bot đã nhận phản hồi nghiệm thu và đang chuyển đến nhóm tổng hợp.',
+          }, 'delivery reply ack');
+
+          const finalHeader = `✅ *NGHIỆM THU VẬT TƯ HOÀN TẤT*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được nghiệm thu thành công bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
-            text: finalMessage,
-          }, 'final notice');
+            text: finalHeader,
+          }, 'final header');
+
+          const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
+            chat_id: autoSetup.finalGroupId,
+            message_thread_id: autoSetup.finalThreadId || undefined,
+            from_chat_id: msg.chat.id,
+            message_id: msg.message_id,
+          }, 'final relay content');
+
           console.log(`[BotListener] Workflow log ${log.id} successfully completed & notified!`);
+        }
+      }
+    }
+
+    // 4. Reply to "supplier requested change" notice
+    if (update.message && update.message.reply_to_message) {
+      const msg = update.message;
+      const replyToMsgId = msg.reply_to_message.message_id;
+      const chatId = msg.chat.id.toString();
+
+      const logRes = await p.query(
+        "SELECT * FROM workflow_logs WHERE supply_change_msg_id = $1 AND status = 'supply_changed'",
+        [replyToMsgId]
+      );
+      if (logRes.rows.length > 0) {
+        for (const log of logRes.rows) {
+          const autoSetup = await loadAutomationSetup(log.automation_id);
+          if (!autoSetup) continue;
+
+          const targetGroupId = autoSetup.supplyChangeGroupId || autoSetup.supplyGroupId;
+          if (!targetGroupId) {
+            console.warn(`[BotListener] Change request group is not configured for automation: ${log.automation_id}. Cannot relay change reply.`);
+            continue;
+          }
+
+          const sourceGroupId = autoSetup.supplyChangeGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId;
+          if (!sourceGroupId) {
+            emitListenerLog('warn', `Không có group nguồn để relay reply thay đổi cho automation ${log.automation_id}.`, {
+              automationId: log.automation_id,
+              step: 'supply-change-reply',
+            });
+            continue;
+          }
+
+          const normSourceGroup = normalizeComparableChatId(sourceGroupId);
+          const normChatId = normalizeComparableChatId(chatId);
+          if (normSourceGroup !== normChatId) {
+            emitListenerLog('warn', `Bỏ qua reply change do chat không khớp. Reply chat=${chatId}, config=${sourceGroupId}.`, {
+              automationId: log.automation_id,
+              step: 'supply-change-reply',
+            });
+            continue;
+          }
+
+          const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
+          const replyText = msg.text || msg.caption || '';
+          const relayHeader = `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Người phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới được bot chuyển tiếp từ tin nhắn reply.`;
+          const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
+
+          const relayData = await sendTelegramMessageWithFallback(baseUrl, {
+            chat_id: targetGroupId,
+            message_thread_id: relayThreadId,
+            text: relayHeader,
+          }, 'supply change relay header');
+
+          if (relayData.ok) {
+            await sendTelegramMethodWithFallback(baseUrl, relayMode, {
+              chat_id: targetGroupId,
+              message_thread_id: relayThreadId,
+              from_chat_id: msg.chat.id,
+              message_id: msg.message_id,
+            }, 'supply change relay content');
+          }
         }
       }
     }
   } catch (err: any) {
     console.error('[BotListener] Error handling bot update:', err.message);
     emitListenerLog('error', `Xử lý update lỗi: ${err.message}`, { step: 'update' });
+    if (update.callback_query && callbackFailureReporter) {
+      await callbackFailureReporter(`❌ Xử lý lựa chọn lỗi: ${err.message}`, 'callback fatal error');
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Ensure single global message event listener handler is registered
+// Handle new Bot API message updates from source groups/topics
 // ---------------------------------------------------------------------------
-async function ensureGlobalHandlerRegistered(): Promise<void> {
-  const client = await getTelegramClient();
+async function handleBotMessageTrigger(
+  msg: any,
+  p: ReturnType<typeof getPool>,
+  botToken: string
+): Promise<void> {
+  const rawChatId = msg?.chat?.id?.toString?.() ?? '';
+  if (!rawChatId) return;
 
-  if (global.__globalListenerHandler && global.__globalListenerClient === client) {
-    return; // Already registered on the current client
+  const chatId = rawChatId.replace(/^-100/, '').replace(/^-/, '');
+  const threadId = normalizeThreadId(msg?.message_thread_id);
+  const sender = msg?.from as any;
+  const hasUserContent = Boolean(
+    msg?.text ||
+    msg?.caption ||
+    msg?.photo ||
+    msg?.document ||
+    msg?.video ||
+    msg?.voice ||
+    msg?.audio ||
+    msg?.animation ||
+    msg?.sticker ||
+    msg?.contact ||
+    msg?.location ||
+    msg?.poll ||
+    msg?.venue ||
+    msg?.dice
+  );
+
+  if (!hasUserContent) {
+    emitListenerLog('info', `Bỏ qua service message ở chat ${chatId}.`, { step: 'filter' });
+    return;
   }
 
-  // Remove from old client if exists
-  if (global.__globalListenerHandler && global.__globalListenerClient) {
-    try {
-      global.__globalListenerClient.removeEventHandler(global.__globalListenerHandler);
-      console.log('[BotListener] Removed global NewMessage handler from old Telegram client.');
-    } catch (e: any) {
-      console.warn('[BotListener] Warning: Failed to remove event handler from old client:', e.message);
-    }
+  const messageText = msg.text || msg.caption || '';
+  const sourceMessageId = Number(msg?.message_id ?? msg?.id);
+  if (!Number.isInteger(sourceMessageId) || sourceMessageId <= 0) {
+    emitListenerLog('error', 'Thiếu message_id từ Bot API, không thể ghi workflow log.', {
+      step: 'db',
+    });
+    return;
+  }
+  console.log(`[BotListener] Bot API received message: "${messageText}" from chat ID: ${rawChatId} (normalized: ${chatId})`);
+
+  if (sender?.is_bot) {
+    console.log(`[BotListener] Ignoring bot-authored message in chat ${chatId}.`);
+    emitListenerLog('info', `Bỏ qua tin nhắn do bot gửi trong chat ${chatId}.`, { step: 'filter' });
+    return;
   }
 
-  const handler = async (event: NewMessageEvent) => {
-    try {
-      const msg = event.message;
-      if (!msg) return;
+  for (const listener of global.__activeListeners!.values()) {
+    if (listener.normalizedSourceId !== chatId) continue;
 
-      const rawChatId = msg.chatId?.toString() ?? '';
-      const chatId = rawChatId.replace(/^-100/, '').replace(/^-/, '');
+    emitListenerLog('info', `Khớp nhóm nguồn ${chatId}. Kiểm tra topic...`, {
+      automationId: listener.automationId,
+      step: 'match',
+    });
 
-      console.log(`[BotListener] Global Handler received message: "${msg.text}" from chat ID: ${rawChatId} (normalized: ${chatId})`);
+    const configuredThreadIds = listener.sourceThreadIds.length > 0
+      ? listener.sourceThreadIds
+      : listener.sourceThreadId !== null
+        ? [listener.sourceThreadId]
+        : [];
 
-      const messageSender = await msg.getSender() as any;
-      if (messageSender?.bot || messageSender?.self || msg.out) {
-        console.log(`[BotListener] Ignoring bot/self-authored message in chat ${chatId}.`);
-        emitListenerLog('info', `Bỏ qua tin nhắn do bot/self gửi trong chat ${chatId}.`, {
-          step: 'filter',
-        });
-        return;
-      }
-      
-      // Iterate through all active listeners to check if sourceGroupId matches
-      for (const listener of global.__activeListeners!.values()) {
-        if (listener.normalizedSourceId === chatId) {
-          emitListenerLog('info', `Khớp nhóm nguồn ${chatId}. Kiểm tra topic...`, {
-            automationId: listener.automationId,
-            step: 'match',
-          });
-          
-          // Check if specific topic thread matches (if topic filtering is configured)
-          const msgReplyTo = msg.replyTo as any;
-          const msgThreadId = normalizeThreadId(
-            msgReplyTo?.replyToTopId ?? msgReplyTo?.replyToMsgId
-          );
-          const configuredThreadIds = listener.sourceThreadIds.length > 0
-            ? listener.sourceThreadIds
-            : listener.sourceThreadId !== null
-              ? [listener.sourceThreadId]
-              : [];
-          if (configuredThreadIds.length > 0 && (msgThreadId === null || !configuredThreadIds.includes(msgThreadId))) {
-            emitListenerLog('warn', `Bỏ qua do topic không khớp. Topic nhận được: ${msgThreadId ?? 'root/general'}, topic cấu hình: ${configuredThreadIds.join(', ')}`, {
-              automationId: listener.automationId,
-              step: 'topic-filter',
-            });
-            continue; // Thread doesn't match, skip.
-          }
-
-          console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${msgThreadId})`);
-          emitListenerLog('info', `Nhận tin nhắn trigger từ topic ${msgThreadId ?? 'root/general'}.`, {
-            automationId: listener.automationId,
-            step: 'trigger',
-          });
-
-          console.log(`[BotListener] Trigger stage: resolving bot token for ${listener.automationId}`);
-          emitListenerLog('info', 'Đang lấy bot token...', { automationId: listener.automationId, step: 'token' });
-          const botToken = global.__globalBotToken || await loadGlobalBotToken();
-          if (!botToken) {
-            console.warn(`[BotListener] Global bot token is missing. Skipping forward for ${listener.automationId}.`);
-            emitListenerLog('error', 'Thiếu bot token toàn cục, không thể tiếp tục.', {
-              automationId: listener.automationId,
-              step: 'token',
-            });
-            continue;
-          }
-          console.log(`[BotListener] Trigger stage: bot token ready for ${listener.automationId}`);
-          emitListenerLog('info', 'Bot token sẵn sàng.', { automationId: listener.automationId, step: 'token' });
-
-          const originalText = msg.text || '';
-          const p = getPool();
-          
-          // Insert into workflow logs
-          console.log(`[BotListener] Trigger stage: writing workflow log for ${listener.automationId}`);
-          emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
-          const logRes = await p.query(
-            `INSERT INTO workflow_logs (automation_id, original_chat_id, original_msg_id, original_text, status)
-             VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
-            [listener.automationId, listener.sourceGroupId, msg.id, originalText]
-          );
-          const logId = logRes.rows[0].id;
-          console.log(`[BotListener] Trigger stage: workflow log created id=${logId} for ${listener.automationId}`);
-          emitListenerLog('info', `Đã tạo workflow log #${logId}.`, { automationId: listener.automationId, step: 'db' });
-
-          let senderName = 'Unknown';
-          try {
-            if (messageSender) {
-              senderName = [messageSender.firstName, messageSender.lastName].filter(Boolean).join(' ') || messageSender.username || messageSender.title || 'Unknown';
-            }
-          } catch {}
-
-          if (!listener.approvalGroupId) {
-            console.warn(`[BotListener] Approval group is not configured for automation: ${listener.automationId}. Skipping message forward.`);
-            emitListenerLog('error', 'Chưa cấu hình nhóm phê duyệt, dừng tại bước trigger.', {
-              automationId: listener.automationId,
-              step: 'approval',
-            });
-            
-            // Still update stats so the user sees the trigger works
-            listener.forwardCount += 1;
-            listener.lastForwardTime = Date.now();
-            await saveAutomationSetup({
-              id: listener.automationId,
-              forwardCount: listener.forwardCount,
-              lastForwardTime: listener.lastForwardTime,
-            });
-            sendSseUpdate({
-              type: 'messageForwarded',
-              automationId: listener.automationId,
-              count: listener.forwardCount,
-              lastTime: listener.lastForwardTime,
-              preview: originalText.substring(0, 60) || '[Media]',
-            });
-            continue;
-          }
-
-          const baseUrl = `https://api.telegram.org/bot${botToken}`;
-          const approvalText = formatApprovalCustomMessage(
-            listener.approvalCustomMessage,
-            senderName,
-            originalText
-          );
-
-          // Send approval prompt first so buttons remain attached to the custom message.
-          console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
-          emitListenerLog('info', `Đang gửi prompt phê duyệt vào nhóm ${listener.approvalGroupId}...`, {
-            automationId: listener.automationId,
-            step: 'approval',
-          });
-          const apprData = await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: listener.approvalGroupId,
-            message_thread_id: listener.approvalThreadId || undefined,
-            text: approvalText,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: '👍 Đồng ý', callback_data: `appr_agree:${logId}` },
-                  { text: '👎 Không đồng ý', callback_data: `appr_disagree:${logId}` }
-                ]
-              ]
-            }
-          }, 'approval prompt');
-          console.log(`[BotListener] Trigger stage: approval response ok=${apprData.ok} for log ${logId}`);
-          emitListenerLog(
-            apprData.ok ? 'info' : 'error',
-            apprData.ok
-              ? `Đã gửi prompt phê duyệt #${logId} thành công.`
-              : `Gửi prompt phê duyệt thất bại: ${apprData.description || 'unknown error'}`,
-            { automationId: listener.automationId, step: 'approval' }
-          );
-          if (apprData.ok) {
-            await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
-          }
-
-          // Send the original message content according to the selected mode.
-          const contentMethod = listener.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-          const contentLabel = listener.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
-          emitListenerLog(
-            'info',
-            listener.approvalMessageMode === 'copy'
-              ? 'Đang copy full nội dung gốc sang nhóm phê duyệt...'
-              : 'Đang forward nội dung gốc sang nhóm phê duyệt...',
-            { automationId: listener.automationId, step: 'content' }
-          );
-          const contentData = await sendTelegramMethodWithFallback(baseUrl, contentMethod, {
-            chat_id: listener.approvalGroupId,
-            message_thread_id: listener.approvalThreadId || undefined,
-            from_chat_id: listener.sourceGroupId,
-            message_id: msg.id,
-          }, contentLabel);
-          console.log(`[BotListener] Trigger stage: ${contentLabel} ok=${contentData.ok} for log ${logId}`);
-          emitListenerLog(
-            contentData.ok ? 'info' : 'error',
-            contentData.ok
-              ? `Đã ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc thành công.`
-              : `Không thể ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
-            { automationId: listener.automationId, step: 'content' }
-          );
-
-          // Update local stats
-          listener.forwardCount += 1;
-          listener.lastForwardTime = Date.now();
-
-          // Persist stats to database
-          await saveAutomationSetup({
-            id: listener.automationId,
-            forwardCount: listener.forwardCount,
-            lastForwardTime: listener.lastForwardTime,
-          });
-
-          // Notify dashboard via SSE
-          sendSseUpdate({
-            type: 'messageForwarded',
-            automationId: listener.automationId,
-            count: listener.forwardCount,
-            lastTime: listener.lastForwardTime,
-            preview: originalText.substring(0, 60) || '[Media]',
-          });
-        }
-      }
-    } catch (err: any) {
-      console.error('[BotListener] Error in global message handler:', err.message);
-      emitListenerLog('error', `Global message handler lỗi: ${err.message}`, { step: 'handler' });
-      sendSseUpdate({ type: 'forwardError', error: err.message });
+    if (configuredThreadIds.length > 0 && (threadId === null || !configuredThreadIds.includes(threadId))) {
+      emitListenerLog('warn', `Bỏ qua do topic không khớp. Topic nhận được: ${threadId ?? 'root/general'}, topic cấu hình: ${configuredThreadIds.join(', ')}`, {
+        automationId: listener.automationId,
+        step: 'topic-filter',
+      });
+      continue;
     }
-  };
 
-  client.addEventHandler(handler, new NewMessage({}));
-  global.__globalListenerHandler = handler;
-  global.__globalListenerClient = client;
-  console.log('[BotListener] Registered global NewMessage handler on Telegram client.');
-  emitListenerLog('info', 'Đã đăng ký handler lắng nghe message mới.', { step: 'handler' });
+    console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${threadId})`);
+    emitListenerLog('info', `Nhận tin nhắn trigger từ topic ${threadId ?? 'root/general'}.`, {
+      automationId: listener.automationId,
+      step: 'trigger',
+    });
+
+    console.log(`[BotListener] Trigger stage: resolving bot token for ${listener.automationId}`);
+    emitListenerLog('info', 'Đang lấy bot token...', { automationId: listener.automationId, step: 'token' });
+    const currentBotToken = botToken || global.__globalBotToken || await loadGlobalBotToken();
+    if (!currentBotToken) {
+      console.warn(`[BotListener] Global bot token is missing. Skipping forward for ${listener.automationId}.`);
+      emitListenerLog('error', 'Thiếu bot token toàn cục, không thể tiếp tục.', {
+        automationId: listener.automationId,
+        step: 'token',
+      });
+      continue;
+    }
+    const activeBaseUrl = `https://api.telegram.org/bot${currentBotToken}`;
+    emitListenerLog('info', 'Bot token sẵn sàng.', { automationId: listener.automationId, step: 'token' });
+
+    const originalText = messageText;
+    console.log(`[BotListener] Trigger stage: writing workflow log for ${listener.automationId}`);
+    emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
+    const logRes = await p.query(
+      `INSERT INTO workflow_logs (automation_id, original_chat_id, original_msg_id, original_text, status)
+       VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
+      [listener.automationId, listener.sourceGroupId, sourceMessageId, originalText]
+    );
+    const logId = logRes.rows[0].id;
+    emitListenerLog('info', `Đã tạo workflow log #${logId}.`, { automationId: listener.automationId, step: 'db' });
+
+    let senderName = 'Unknown';
+    try {
+      senderName = [sender?.first_name, sender?.last_name].filter(Boolean).join(' ')
+        || sender?.username
+        || msg?.sender_chat?.title
+        || 'Unknown';
+    } catch {}
+
+    if (!listener.approvalGroupId) {
+      console.warn(`[BotListener] Approval group is not configured for automation: ${listener.automationId}. Skipping message forward.`);
+      emitListenerLog('error', 'Chưa cấu hình nhóm phê duyệt, dừng tại bước trigger.', {
+        automationId: listener.automationId,
+        step: 'approval',
+      });
+
+      listener.forwardCount += 1;
+      listener.lastForwardTime = Date.now();
+      await saveAutomationSetup({
+        id: listener.automationId,
+        forwardCount: listener.forwardCount,
+        lastForwardTime: listener.lastForwardTime,
+      });
+      sendSseUpdate({
+        type: 'messageForwarded',
+        automationId: listener.automationId,
+        count: listener.forwardCount,
+        lastTime: listener.lastForwardTime,
+        preview: originalText.substring(0, 60) || '[Media]',
+      });
+      continue;
+    }
+
+    const approvalText = formatApprovalCustomMessage(
+      listener.approvalCustomMessage,
+      senderName,
+      originalText
+    );
+
+    console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
+    emitListenerLog('info', `Đang gửi prompt phê duyệt vào nhóm ${listener.approvalGroupId}...`, {
+      automationId: listener.automationId,
+      step: 'approval',
+    });
+    const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
+      chat_id: listener.approvalGroupId,
+      message_thread_id: listener.approvalThreadId || undefined,
+      text: approvalText,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '👍 Đồng ý', callback_data: `appr_agree:${logId}` },
+            { text: '👎 Không đồng ý', callback_data: `appr_disagree:${logId}` }
+          ]
+        ]
+      }
+    }, 'approval prompt');
+    emitListenerLog(
+      apprData.ok ? 'info' : 'error',
+      apprData.ok
+        ? `Đã gửi prompt phê duyệt #${logId} thành công.`
+        : `Gửi prompt phê duyệt thất bại: ${apprData.description || 'unknown error'}`,
+      { automationId: listener.automationId, step: 'approval' }
+    );
+    if (apprData.ok) {
+      await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
+    }
+
+    const contentMethod = listener.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+    const contentLabel = listener.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
+    emitListenerLog(
+      'info',
+      listener.approvalMessageMode === 'copy'
+        ? 'Đang copy full nội dung gốc sang nhóm phê duyệt...'
+        : 'Đang forward nội dung gốc sang nhóm phê duyệt...',
+      { automationId: listener.automationId, step: 'content' }
+    );
+    const contentData = await sendTelegramMethodWithFallback(activeBaseUrl, contentMethod, {
+      chat_id: listener.approvalGroupId,
+      message_thread_id: listener.approvalThreadId || undefined,
+      from_chat_id: listener.sourceGroupId,
+      message_id: sourceMessageId,
+    }, contentLabel);
+    emitListenerLog(
+      contentData.ok ? 'info' : 'error',
+      contentData.ok
+        ? `Đã ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc thành công.`
+        : `Không thể ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
+      { automationId: listener.automationId, step: 'content' }
+    );
+
+    listener.forwardCount += 1;
+    listener.lastForwardTime = Date.now();
+
+    await saveAutomationSetup({
+      id: listener.automationId,
+      forwardCount: listener.forwardCount,
+      lastForwardTime: listener.lastForwardTime,
+    });
+
+    sendSseUpdate({
+      type: 'messageForwarded',
+      automationId: listener.automationId,
+      count: listener.forwardCount,
+      lastTime: listener.lastForwardTime,
+      preview: originalText.substring(0, 60) || '[Media]',
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -713,6 +1082,8 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
 export async function startListenerForAutomation(automationId: string): Promise<void> {
   const setup = await loadAutomationSetup(automationId);
   if (!setup) throw new Error('Không tìm thấy cấu hình Automation.');
+
+  removeLegacyGramjsListenerIfAny();
 
   const botToken = global.__globalBotToken || await loadGlobalBotToken();
   global.__globalBotToken = botToken;
@@ -746,8 +1117,10 @@ export async function startListenerForAutomation(automationId: string): Promise<
     approvalCustomMessage: setup.approvalCustomMessage,
     supplyGroupId: setup.supplyGroupId,
     supplyThreadId: setup.supplyThreadId,
+    supplierRoutes: setup.supplierRoutes,
     deliveryGroupId: setup.deliveryGroupId,
     deliveryThreadId: setup.deliveryThreadId,
+    finalMessageMode: setup.finalMessageMode,
     finalGroupId: setup.finalGroupId,
     finalThreadId: setup.finalThreadId,
     rejectGroupId: setup.rejectGroupId,
@@ -755,9 +1128,6 @@ export async function startListenerForAutomation(automationId: string): Promise<
     forwardCount: setup.forwardCount,
     lastForwardTime: setup.lastForwardTime,
   });
-
-  // Ensure global handler is active
-  await ensureGlobalHandlerRegistered();
 
   // Start polling
   startBotPolling();
@@ -813,10 +1183,10 @@ async function trySendApprovalMedia(baseUrl: string, chatId: string, threadId: n
     if (!buffer || buffer.length === 0) return;
 
     const hasPhoto = !!msg.photo;
-    const hasVideo = !!msg.video;
+  const hasVideo = !!msg.video;
 
-    const form = new FormData();
-    form.append('chat_id', toBotApiChatId(chatId));
+  const form = new FormData();
+  form.append('chat_id', await resolveBotApiChatId(chatId));
     if (threadId) {
       form.append('message_thread_id', threadId.toString());
     }
@@ -842,9 +1212,24 @@ async function trySendApprovalMedia(baseUrl: string, chatId: string, threadId: n
   }
 }
 
-function toBotApiChatId(chatId: string): string {
+async function resolveBotApiChatId(chatId: string): Promise<string> {
   if (!chatId) return chatId;
-  if (chatId.startsWith('-100') || chatId.startsWith('-')) return chatId;
+  if (chatId.startsWith('-100') || chatId.startsWith('-') || chatId.startsWith('@')) return chatId;
+  if (!/^\d+$/.test(chatId)) return chatId;
+
+  try {
+    const db = await loadDatabase();
+    const chat = db.chats[chatId];
+    if (chat?.chatType === 'group') {
+      return `-${chatId}`;
+    }
+    if (chat?.chatType === 'channel' || chat?.chatType === 'supergroup') {
+      return `-100${chatId}`;
+    }
+  } catch (err: any) {
+    console.warn(`[BotListener] resolveBotApiChatId fallback for ${chatId}: ${err?.message || err}`);
+  }
+
   return `-100${chatId}`;
 }
 
@@ -859,6 +1244,44 @@ function formatApprovalCustomMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
 }
 
+function isSupplierRoutingMessage(text: string): boolean {
+  const normalized = (text || '').trim();
+  return /^CT\s*:/i.test(normalized);
+}
+
+function explainSupplierRoutingMatch(text: string): string {
+  const normalized = (text || '').trim();
+  return /^CT\s*:/i.test(normalized)
+    ? 'Đủ điều kiện CT'
+    : 'Thiếu: CT ở đầu tin nhắn';
+}
+
+function normalizeComparableChatId(chatId: string | number | null | undefined): string {
+  if (chatId === null || chatId === undefined) return '';
+  return String(chatId).replace(/^-100/, '').replace(/^-/, '');
+}
+
+function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
+  const routes = Array.isArray(autoSetup?.supplierRoutes) ? autoSetup.supplierRoutes : [];
+  if (routes.length > 0) {
+    return routes;
+  }
+
+  if (autoSetup?.supplyGroupId) {
+    return [
+      {
+        id: 'legacy-supply',
+        name: 'Nhà cung ứng mặc định',
+        groupId: autoSetup.supplyGroupId,
+        threadId: autoSetup.supplyThreadId ?? null,
+        messageMode: autoSetup.approvalMessageMode === 'copy' ? 'copy' : 'forward',
+      },
+    ];
+  }
+
+  return [];
+}
+
 async function sendTelegramJson(
   baseUrl: string,
   method: string,
@@ -871,10 +1294,10 @@ async function sendTelegramJson(
     console.log(`[BotListener] Telegram ${method} -> sending...`);
     const normalizedPayload = { ...payload };
     if (normalizedPayload.chat_id !== undefined) {
-      normalizedPayload.chat_id = toBotApiChatId(String(normalizedPayload.chat_id));
+      normalizedPayload.chat_id = await resolveBotApiChatId(String(normalizedPayload.chat_id));
     }
     if (normalizedPayload.from_chat_id !== undefined) {
-      normalizedPayload.from_chat_id = toBotApiChatId(String(normalizedPayload.from_chat_id));
+      normalizedPayload.from_chat_id = await resolveBotApiChatId(String(normalizedPayload.from_chat_id));
     }
     const res = await fetch(`${baseUrl}/${method}`, {
       method: 'POST',
@@ -935,6 +1358,18 @@ async function sendTelegramMessageWithFallback(
     return sendTelegramJson(baseUrl, 'sendMessage', fallbackPayload);
   }
 
+  return primary;
+}
+
+async function editTelegramMessageWithFallback(
+  baseUrl: string,
+  payload: Record<string, unknown>,
+  label: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const primary = await sendTelegramJson(baseUrl, 'editMessageText', payload);
+  if (primary.ok) return primary;
+
+  console.warn(`[BotListener] Failed to edit ${label}: ${primary.description || 'unknown error'}`);
   return primary;
 }
 

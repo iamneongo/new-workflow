@@ -40,6 +40,7 @@ export default function ChatsList({
         <button 
           className="btn btn-primary" 
           onClick={onCreateAutomation}
+          id="createAutomationButton"
           style={{ 
             width: '100%', 
             display: 'flex', 
@@ -76,7 +77,7 @@ export default function ChatsList({
         <h2>Danh sách Automation</h2>
       </div>
 
-      <div className="chats-list">
+      <div className="chats-list" id="automationList">
         {filtered.length === 0 ? (
           <div className="no-results">Chưa có cấu hình automation nào</div>
         ) : (
@@ -88,6 +89,7 @@ export default function ChatsList({
             return (
               <div
                 key={auto.id}
+                id={`automation-item-${auto.id}`}
                 className={`chat-item${selectedAutomationId === auto.id ? ' active' : ''}`}
                 onClick={() => onSelectAutomation(auto.id)}
               >

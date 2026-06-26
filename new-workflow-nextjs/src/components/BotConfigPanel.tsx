@@ -139,19 +139,16 @@ export default function BotConfigPanel({
       zIndex: 1000,
     }}>
       <div className="bot-panel" style={{
-        background: 'var(--bg-secondary)',
-        border: '1px solid var(--border-color)',
-        borderRadius: '8px',
-        width: '450px',
-        boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
-        overflow: 'hidden',
+        background: 'var(--bg-primary)',
+        width: 'min(440px, calc(100vw - 24px))',
+        maxHeight: 'calc(100dvh - 24px)',
       }}>
         {/* Panel Header */}
         <div className="bot-panel-header" style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '16px',
+          padding: '14px 16px',
           borderBottom: '1px solid var(--border-color)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -171,12 +168,12 @@ export default function BotConfigPanel({
         </div>
 
         {/* Panel Body */}
-        <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="bot-panel-body" style={{ paddingTop: '14px' }}>
           {statusMessage && (
             <div style={{
               background: 'var(--bg-primary)',
               border: '1px solid var(--border-color)',
-              padding: '8px',
+              padding: '7px 8px',
               borderRadius: '4px',
               fontSize: '11px',
               textAlign: 'center',
@@ -230,7 +227,7 @@ export default function BotConfigPanel({
             )}
           </div>
 
-          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
+          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
             * Thay đổi ở đây sẽ cập nhật Token Bot toàn cục dùng cho tất cả Automation.
           </span>
 
@@ -246,7 +243,7 @@ export default function BotConfigPanel({
           )}
 
           {/* Action buttons */}
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '4px' }}>
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '2px' }}>
             <button className="btn btn-secondary" onClick={onClose} style={{ fontSize: '11px', padding: '6px 12px', borderRadius: '4px' }}>Đóng</button>
             <button
               className="btn btn-primary"

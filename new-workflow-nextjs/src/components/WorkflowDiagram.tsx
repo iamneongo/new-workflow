@@ -51,13 +51,6 @@ export default function WorkflowDiagram() {
       onMouseLeave={handleMouseUpOrLeave}
       style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
     >
-      <div className="workflow-header-info">
-        <h4 className="workflow-sub-title">SƠ ĐỒ QUY TRÌNH AUTOMATION CÔNG TRÌNH</h4>
-        <p className="workflow-desc">
-          Mô hình hóa luồng xử lý tin nhắn và phê duyệt vật tư tự động dựa trên cấu hình Bot của công trình.
-        </p>
-      </div>
-
       <div className="workflow-tree">
         {/* Node 1: Start & Listen */}
         <div className="workflow-node start-node">
@@ -65,7 +58,7 @@ export default function WorkflowDiagram() {
           <div className="node-content">
             <span className="node-tag">Bước 1: Trigger</span>
             <h5 className="node-title">Lắng nghe nhóm nguồn</h5>
-            <p className="node-text">Userbot theo dõi mọi tin nhắn mới trong nhóm công trình được chọn.</p>
+            <p className="node-text">Bot theo dõi mọi tin nhắn mới trong nhóm công trình được chọn.</p>
           </div>
         </div>
 
@@ -83,7 +76,7 @@ export default function WorkflowDiagram() {
             <span className="node-tag">Bước 2: Phê duyệt sơ bộ</span>
             <h5 className="node-title">Bot forward &amp; Hỏi ý kiến</h5>
             <p className="node-text">
-              Bot gửi tin nhắn tới nhóm đích kèm 2 nút tương tác:
+              Bot gửi tin nhắn tới nhóm đích kèm 2 nút tương tác. Với tin CT:, sau khi duyệt sẽ bật nhánh chọn nhà cung ứng:
             </p>
             <div className="node-options-inline">
               <span className="opt-badge opt-agree"><i className="fa-solid fa-check" /> Đồng ý</span>
@@ -138,7 +131,7 @@ export default function WorkflowDiagram() {
                 <div className="node-content">
                   <span className="node-tag">Bước 3: Lựa chọn vật tư</span>
                   <h5 className="node-title">Hỏi phương án cung cấp</h5>
-                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi:</p>
+                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi. Tin CT: sẽ hiển thị danh sách nhà cung ứng để chọn trước khi gửi tiếp:</p>
                   <div className="node-options-list">
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Đồng ý cung cấp vật tư</div>
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Không đồng ý cung cấp vật tư</div>
@@ -161,7 +154,7 @@ export default function WorkflowDiagram() {
                 </div>
 
                 <div className="workflow-branches">
-                  {/* Sub-branch Left: Disagree / Change */}
+                  {/* Sub-branch Left: Reject */}
                   <div className="workflow-branch branch-left">
                     <span className="branch-label label-neutral">Không đồng ý / Thay đổi</span>
                     <div className="workflow-arrow-v">
@@ -172,8 +165,8 @@ export default function WorkflowDiagram() {
                     <div className="workflow-node end-node">
                       <div className="node-icon">📢</div>
                       <div className="node-content">
-                        <h5 className="node-title">Thông báo trạng thái</h5>
-                        <p className="node-text">Cập nhật tin nhắn báo lỗi hoặc yêu cầu chỉnh sửa vật tư vào nhóm đích.</p>
+                        <h5 className="node-title">Thông báo yêu cầu thay đổi vật tư</h5>
+                        <p className="node-text">Gửi thông báo để nhà cung ứng reply nội dung thay đổi, sau đó bot chuyển tiếp sang nhóm cấu hình.</p>
                       </div>
                     </div>
                   </div>

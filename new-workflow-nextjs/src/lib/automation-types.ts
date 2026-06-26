@@ -1,4 +1,15 @@
 export type ApprovalMessageMode = 'forward' | 'copy';
+export type SupplierRouteMode = 'forward' | 'copy';
+export type FinalMessageMode = 'forward' | 'copy';
+export type SupplyChangeMessageMode = 'forward' | 'copy';
+
+export interface SupplierRoute {
+  id: string;
+  name: string;
+  groupId: string;
+  threadId: number | null;
+  messageMode: SupplierRouteMode;
+}
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
@@ -33,8 +44,13 @@ export interface AutomationSetup {
   approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplyChangeGroupId: string;
+  supplyChangeThreadId: number | null;
+  supplyChangeMessageMode: SupplyChangeMessageMode;
+  supplierRoutes: SupplierRoute[];
   deliveryGroupId: string;
   deliveryThreadId: number | null;
+  finalMessageMode: FinalMessageMode;
   finalGroupId: string;
   finalThreadId: number | null;
   rejectGroupId: string;

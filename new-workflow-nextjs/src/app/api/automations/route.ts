@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { loadAutomationSetups, saveAutomationSetup, AutomationSetup, saveGlobalBotToken, normalizeThreadId } from '@/lib/database';
+import { loadAutomationSetup, loadAutomationSetups, saveAutomationSetup, AutomationSetup, saveGlobalBotToken, normalizeThreadId } from '@/lib/database';
+import { startListenerForAutomation, stopListenerForAutomation } from '@/lib/bot-listener';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,13 +30,15 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { 
+    const {
       id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
       approvalGroupId, approvalThreadId, approvalMessageMode, approvalCustomMessage,
-      supplyGroupId, supplyThreadId,
+      supplyGroupId, supplyThreadId, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
       deliveryGroupId, deliveryThreadId,
+      finalMessageMode,
       finalGroupId, finalThreadId,
-      rejectGroupId, rejectThreadId
+      rejectGroupId, rejectThreadId,
+      restartIfListening = true,
     } = body;
 
     if (!id) {
@@ -74,8 +77,13 @@ export async function POST(req: NextRequest) {
     if (approvalCustomMessage !== undefined) updates.approvalCustomMessage = approvalCustomMessage;
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;
     if (supplyThreadId !== undefined) updates.supplyThreadId = normalizeThreadId(supplyThreadId);
+    if (supplyChangeGroupId !== undefined) updates.supplyChangeGroupId = supplyChangeGroupId;
+    if (supplyChangeThreadId !== undefined) updates.supplyChangeThreadId = normalizeThreadId(supplyChangeThreadId);
+    if (supplyChangeMessageMode !== undefined) updates.supplyChangeMessageMode = supplyChangeMessageMode;
+    if (supplierRoutes !== undefined) updates.supplierRoutes = supplierRoutes;
     if (deliveryGroupId !== undefined) updates.deliveryGroupId = deliveryGroupId;
     if (deliveryThreadId !== undefined) updates.deliveryThreadId = normalizeThreadId(deliveryThreadId);
+    if (finalMessageMode !== undefined) updates.finalMessageMode = finalMessageMode;
     if (finalGroupId !== undefined) updates.finalGroupId = finalGroupId;
     if (finalThreadId !== undefined) updates.finalThreadId = normalizeThreadId(finalThreadId);
     if (rejectGroupId !== undefined) updates.rejectGroupId = rejectGroupId;
@@ -84,10 +92,18 @@ export async function POST(req: NextRequest) {
     // Maintain destGroupId for compatibility
     if (supplyGroupId !== undefined) updates.destGroupId = supplyGroupId;
 
+    const current = await loadAutomationSetup(id);
+    const wasListening = current?.isListening ?? false;
     const updated = await saveAutomationSetup(updates);
+
+    if (wasListening && restartIfListening) {
+      await stopListenerForAutomation(id);
+      await startListenerForAutomation(id);
+    }
 
     return NextResponse.json({
       success: true,
+      restarted: wasListening && restartIfListening,
       setup: {
         ...updated,
         botToken: updated.botToken ? `****${updated.botToken.slice(-6)}` : '',

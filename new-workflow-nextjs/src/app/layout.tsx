@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
+import 'driver.js/dist/driver.css';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Telegram Bot Tracker - Quản lý Nhóm & Chủ đề',
-  description: 'Dashboard giám sát nhóm và chủ đề Telegram tự động sử dụng GramJS Userbot',
+  description: 'Dashboard giám sát nhóm và chủ đề Telegram tự động bằng Bot API',
 };
 
 export default function RootLayout({
