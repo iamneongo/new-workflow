@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatEntry, AutomationSetup, TopicEntry } from '@/lib/database';
+import { ChatEntry, AutomationSetup, TopicEntry, DEFAULT_APPROVAL_CUSTOM_MESSAGE, ApprovalMessageMode } from '@/lib/database';
 
 interface ChatDetailsProps {
   automation: AutomationSetup | null;
@@ -60,6 +60,8 @@ export default function ChatDetails({
 
   const [approvalGroupIdInput, setApprovalGroupIdInput] = useState('');
   const [approvalThreadIdInput, setApprovalThreadIdInput] = useState<number | ''>('');
+  const [approvalMessageModeInput, setApprovalMessageModeInput] = useState<ApprovalMessageMode>('forward');
+  const [approvalCustomMessageInput, setApprovalCustomMessageInput] = useState(DEFAULT_APPROVAL_CUSTOM_MESSAGE);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
@@ -121,6 +123,8 @@ export default function ChatDetails({
 
       setApprovalGroupIdInput(automation.approvalGroupId || '');
       setApprovalThreadIdInput(automation.approvalThreadId !== null && automation.approvalThreadId !== undefined ? automation.approvalThreadId : '');
+      setApprovalMessageModeInput(automation.approvalMessageMode || 'forward');
+      setApprovalCustomMessageInput(automation.approvalCustomMessage || DEFAULT_APPROVAL_CUSTOM_MESSAGE);
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
@@ -226,6 +230,8 @@ export default function ChatDetails({
       if (field === 'approval') {
         updates.approvalGroupId = approvalGroupIdInput;
         updates.approvalThreadId = approvalThreadIdInput === '' ? null : Number(approvalThreadIdInput);
+        updates.approvalMessageMode = approvalMessageModeInput;
+        updates.approvalCustomMessage = approvalCustomMessageInput;
       }
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
@@ -393,13 +399,24 @@ export default function ChatDetails({
     );
   };
 
+  const renderApprovalModeBadge = (mode: ApprovalMessageMode) => {
+    const label = mode === 'copy' ? 'Copy full tin nhắn' : 'Forward tin nhắn';
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(34, 158, 217, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(34, 158, 217, 0.2)' }}>
+        <span>🔁</span>
+        <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{label}</span>
+      </span>
+    );
+  };
+
   const renderGroupTopicSelector = (
     groupIdVal: string,
     setGroupId: any,
     threadIdVal: number | '' | number[],
     setThreadId: any,
     onCancel: () => void,
-    onSave: () => void
+    onSave: () => void,
+    extraControls?: React.ReactNode
   ) => {
     const selectedChat = chats[groupIdVal];
     const topicsList = selectedChat ? Object.values(selectedChat.topics || {}).sort((a, b) => a.topicName.localeCompare(b.topicName)) : [];
@@ -675,6 +692,8 @@ export default function ChatDetails({
             )}
           </div>
         )}
+
+        {extraControls}
 
         <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
           <button className="btn btn-secondary" onClick={onCancel} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '4px' }}>Hủy</button>
@@ -1073,7 +1092,45 @@ export default function ChatDetails({
                   approvalThreadIdInput,
                   setApprovalThreadIdInput,
                   () => setEditCard(null),
-                  () => handleSaveCard('approval')
+                  () => handleSaveCard('approval'),
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách gửi nội dung gốc:</label>
+                      <select
+                        value={approvalMessageModeInput}
+                        onChange={(e) => setApprovalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
+                        style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                      >
+                        <option value="forward">Forward tin nhắn + message custom</option>
+                        <option value="copy">Copy full tin nhắn + message custom</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Message tự custom:</label>
+                      <textarea
+                        value={approvalCustomMessageInput}
+                        onChange={(e) => setApprovalCustomMessageInput(e.target.value)}
+                        rows={4}
+                        placeholder={DEFAULT_APPROVAL_CUSTOM_MESSAGE}
+                        style={{
+                          background: 'var(--bg-primary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '4px',
+                          padding: '6px 8px',
+                          color: 'var(--color-text)',
+                          width: '100%',
+                          fontSize: '12px',
+                          resize: 'vertical',
+                          minHeight: '84px',
+                          lineHeight: 1.4,
+                        }}
+                      />
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                        Message này sẽ được gửi trước tin nhắn gốc để người duyệt đọc nhanh. Có thể dùng nội dung mặc định hoặc tự sửa theo ý bạn.
+                      </div>
+                    </div>
+                  </div>
                 )
               ) : (
                 <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1081,9 +1138,15 @@ export default function ChatDetails({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Phê duyệt:</span>
                       {renderGroupTopicBadge(automation.approvalGroupId, automation.approvalThreadId)}
+                      {renderApprovalModeBadge(automation.approvalMessageMode)}
                     </div>
                   ) : (
                     <span style={{ color: '#f59e0b' }}>⚠️ Chưa cấu hình nhóm Phê duyệt.</span>
+                  )}
+                  {automation.approvalCustomMessage && (
+                    <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', fontSize: '10px', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>
+                      {automation.approvalCustomMessage}
+                    </div>
                   )}
                 </div>
               )}

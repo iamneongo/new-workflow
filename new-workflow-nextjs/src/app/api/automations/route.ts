@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { 
       id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
-      approvalGroupId, approvalThreadId,
+      approvalGroupId, approvalThreadId, approvalMessageMode, approvalCustomMessage,
       supplyGroupId, supplyThreadId,
       deliveryGroupId, deliveryThreadId,
       finalGroupId, finalThreadId,
@@ -70,6 +70,8 @@ export async function POST(req: NextRequest) {
     }
     if (approvalGroupId !== undefined) updates.approvalGroupId = approvalGroupId;
     if (approvalThreadId !== undefined) updates.approvalThreadId = normalizeThreadId(approvalThreadId);
+    if (approvalMessageMode !== undefined) updates.approvalMessageMode = approvalMessageMode;
+    if (approvalCustomMessage !== undefined) updates.approvalCustomMessage = approvalCustomMessage;
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;
     if (supplyThreadId !== undefined) updates.supplyThreadId = normalizeThreadId(supplyThreadId);
     if (deliveryGroupId !== undefined) updates.deliveryGroupId = deliveryGroupId;

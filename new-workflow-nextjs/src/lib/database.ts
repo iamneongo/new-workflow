@@ -31,6 +31,15 @@ export function normalizeThreadId(value: unknown): number | null {
   return parsed;
 }
 
+export type ApprovalMessageMode = 'forward' | 'copy';
+
+export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMode {
+  return value === 'copy' ? 'copy' : 'forward';
+}
+
+export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
+  '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+
 export function normalizeThreadIds(value: unknown): number[] {
   if (value === null || value === undefined || value === '') {
     return [];
@@ -96,6 +105,8 @@ export interface AutomationSetup {
   sourceThreadId: number | null;
   approvalGroupId: string;
   approvalThreadId: number | null;
+  approvalMessageMode: ApprovalMessageMode;
+  approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
   deliveryGroupId: string;
@@ -149,14 +160,16 @@ export async function ensureDatabase(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS automation_setups (
         id VARCHAR(100) PRIMARY KEY,
-      name VARCHAR(255) NOT NULL,
-      bot_token VARCHAR(255),
-      source_group_id VARCHAR(100),
-      source_thread_ids INTEGER[],
-      dest_group_id VARCHAR(100),
-      is_listening BOOLEAN DEFAULT FALSE NOT NULL,
-      forward_count INTEGER DEFAULT 0 NOT NULL,
-      last_forward_time BIGINT
+        name VARCHAR(255) NOT NULL,
+        bot_token VARCHAR(255),
+        source_group_id VARCHAR(100),
+        source_thread_ids INTEGER[],
+        approval_message_mode VARCHAR(20),
+        approval_custom_message TEXT,
+        dest_group_id VARCHAR(100),
+        is_listening BOOLEAN DEFAULT FALSE NOT NULL,
+        forward_count INTEGER DEFAULT 0 NOT NULL,
+        last_forward_time BIGINT
       );
     `);
 
@@ -166,6 +179,8 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_ids INTEGER[]',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_message_mode VARCHAR(20)',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_custom_message TEXT',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS delivery_group_id VARCHAR(100)',
@@ -184,6 +199,13 @@ export async function ensureDatabase(): Promise<void> {
       SET source_thread_ids = ARRAY[source_thread_id]
       WHERE source_thread_ids IS NULL AND source_thread_id IS NOT NULL
     `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET approval_message_mode = COALESCE(approval_message_mode, 'forward'),
+          approval_custom_message = COALESCE(approval_custom_message, $1)
+      WHERE approval_message_mode IS NULL OR approval_custom_message IS NULL
+    `, [DEFAULT_APPROVAL_CUSTOM_MESSAGE]);
 
     // Create workflow_logs table
     await client.query(`
@@ -352,6 +374,8 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   sourceThreadId: null,
   approvalGroupId: '',
   approvalThreadId: null,
+  approvalMessageMode: 'forward',
+  approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   supplyGroupId: '',
   supplyThreadId: null,
   deliveryGroupId: '',
@@ -386,6 +410,8 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         sourceThreadId: sourceThreadIds[0] ?? null,
         approvalGroupId: row.approval_group_id || '',
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
+        approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
+        approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         deliveryGroupId: row.delivery_group_id || '',
@@ -427,6 +453,8 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       sourceThreadId: sourceThreadIds[0] ?? null,
       approvalGroupId: row.approval_group_id || '',
       approvalThreadId: normalizeThreadId(row.approval_thread_id),
+      approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
+      approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
       supplyGroupId: row.supply_group_id || '',
       supplyThreadId: normalizeThreadId(row.supply_thread_id),
       deliveryGroupId: row.delivery_group_id || '',
@@ -466,6 +494,12 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       ...setup,
       sourceThreadIds,
       sourceThreadId: sourceThreadIds[0] ?? null,
+      approvalMessageMode: hasField('approvalMessageMode')
+        ? normalizeApprovalMessageMode(setup.approvalMessageMode)
+        : current.approvalMessageMode,
+      approvalCustomMessage: hasField('approvalCustomMessage')
+        ? (typeof setup.approvalCustomMessage === 'string' ? setup.approvalCustomMessage : String(setup.approvalCustomMessage ?? ''))
+        : current.approvalCustomMessage,
       approvalThreadId: hasField('approvalThreadId') ? normalizeThreadId(setup.approvalThreadId) : current.approvalThreadId,
       supplyThreadId: hasField('supplyThreadId') ? normalizeThreadId(setup.supplyThreadId) : current.supplyThreadId,
       deliveryThreadId: hasField('deliveryThreadId') ? normalizeThreadId(setup.deliveryThreadId) : current.deliveryThreadId,
@@ -476,14 +510,14 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
     await p.query(`
         INSERT INTO automation_setups (
         id, name, source_group_id, source_thread_id, source_thread_ids,
-        approval_group_id, approval_thread_id,
+        approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message,
         supply_group_id, supply_thread_id,
         delivery_group_id, delivery_thread_id,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
@@ -491,6 +525,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         source_thread_ids = EXCLUDED.source_thread_ids,
         approval_group_id = EXCLUDED.approval_group_id,
         approval_thread_id = EXCLUDED.approval_thread_id,
+        approval_message_mode = EXCLUDED.approval_message_mode,
+        approval_custom_message = EXCLUDED.approval_custom_message,
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
         delivery_group_id = EXCLUDED.delivery_group_id,
@@ -511,6 +547,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.sourceThreadIds,
       updated.approvalGroupId,
       updated.approvalThreadId,
+      updated.approvalMessageMode,
+      updated.approvalCustomMessage,
       updated.supplyGroupId,
       updated.supplyThreadId,
       updated.deliveryGroupId,
@@ -566,6 +604,8 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         sourceThreadId: sourceThreadIds[0] ?? null,
         approvalGroupId: row.approval_group_id || '',
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
+        approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
+        approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         deliveryGroupId: row.delivery_group_id || '',

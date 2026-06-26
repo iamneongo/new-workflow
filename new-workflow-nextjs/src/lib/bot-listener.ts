@@ -24,7 +24,8 @@ import {
   loadGlobalBotToken, 
   getPool,
   normalizeThreadId,
-  AutomationSetup 
+  ApprovalMessageMode,
+  DEFAULT_APPROVAL_CUSTOM_MESSAGE,
 } from './database';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,8 @@ export interface ActiveListener {
   normalizedSourceId: string;
   approvalGroupId: string;
   approvalThreadId: number | null;
+  approvalMessageMode: ApprovalMessageMode;
+  approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
   deliveryGroupId: string;
@@ -133,6 +136,8 @@ export async function autoStartFromConfig(): Promise<void> {
           normalizedSourceId: normalized,
           approvalGroupId: setup.approvalGroupId,
           approvalThreadId: setup.approvalThreadId,
+          approvalMessageMode: setup.approvalMessageMode,
+          approvalCustomMessage: setup.approvalCustomMessage,
           supplyGroupId: setup.supplyGroupId,
           supplyThreadId: setup.supplyThreadId,
           deliveryGroupId: setup.deliveryGroupId,
@@ -537,9 +542,13 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
           }
 
           const baseUrl = `https://api.telegram.org/bot${botToken}`;
-          const approvalText = `📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\n👤 Người gửi: *${senderName}*\n\nNội dung:\n${originalText || '[Hình ảnh/Tài liệu]'}`;
+          const approvalText = formatApprovalCustomMessage(
+            listener.approvalCustomMessage,
+            senderName,
+            originalText
+          );
 
-          // Send message to approvalGroupId
+          // Send approval prompt first so buttons remain attached to the custom message.
           console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
           const apprData = await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: listener.approvalGroupId,
@@ -559,13 +568,16 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
             await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
           }
 
-          // Forward media if present
-          const hasPhoto = !!(msg as any).photo;
-          const hasVideo = !!(msg as any).video;
-          const hasDocument = !!(msg as any).document;
-          if (hasPhoto || hasVideo || hasDocument) {
-            await trySendApprovalMedia(baseUrl, listener.approvalGroupId, listener.approvalThreadId, msg);
-          }
+          // Send the original message content according to the selected mode.
+          const contentMethod = listener.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          const contentLabel = listener.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
+          const contentData = await sendTelegramMethodWithFallback(baseUrl, contentMethod, {
+            chat_id: listener.approvalGroupId,
+            message_thread_id: listener.approvalThreadId || undefined,
+            from_chat_id: listener.sourceGroupId,
+            message_id: msg.id,
+          }, contentLabel);
+          console.log(`[BotListener] Trigger stage: ${contentLabel} ok=${contentData.ok} for log ${logId}`);
 
           // Update local stats
           listener.forwardCount += 1;
@@ -635,6 +647,8 @@ export async function startListenerForAutomation(automationId: string): Promise<
     normalizedSourceId: normalized,
     approvalGroupId: setup.approvalGroupId,
     approvalThreadId: setup.approvalThreadId,
+    approvalMessageMode: setup.approvalMessageMode,
+    approvalCustomMessage: setup.approvalCustomMessage,
     supplyGroupId: setup.supplyGroupId,
     supplyThreadId: setup.supplyThreadId,
     deliveryGroupId: setup.deliveryGroupId,
@@ -734,6 +748,17 @@ function toBotApiChatId(chatId: string): string {
   return `-100${chatId}`;
 }
 
+function formatApprovalCustomMessage(
+  template: string,
+  senderName: string,
+  originalText: string
+): string {
+  const base = (template || DEFAULT_APPROVAL_CUSTOM_MESSAGE).trim() || DEFAULT_APPROVAL_CUSTOM_MESSAGE;
+  return base
+    .replaceAll('{{senderName}}', senderName)
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
 async function sendTelegramJson(
   baseUrl: string,
   method: string,
@@ -747,6 +772,9 @@ async function sendTelegramJson(
     const normalizedPayload = { ...payload };
     if (normalizedPayload.chat_id !== undefined) {
       normalizedPayload.chat_id = toBotApiChatId(String(normalizedPayload.chat_id));
+    }
+    if (normalizedPayload.from_chat_id !== undefined) {
+      normalizedPayload.from_chat_id = toBotApiChatId(String(normalizedPayload.from_chat_id));
     }
     const res = await fetch(`${baseUrl}/${method}`, {
       method: 'POST',
@@ -769,6 +797,26 @@ async function sendTelegramJson(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function sendTelegramMethodWithFallback(
+  baseUrl: string,
+  method: 'forwardMessage' | 'copyMessage',
+  payload: Record<string, unknown>,
+  label: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const primary = await sendTelegramJson(baseUrl, method, payload);
+  if (primary.ok) return primary;
+
+  const threadId = payload.message_thread_id;
+  if (threadId !== undefined) {
+    const fallbackPayload = { ...payload };
+    delete fallbackPayload.message_thread_id;
+    console.warn(`[BotListener] Retrying ${label} without message_thread_id fallback.`);
+    return sendTelegramJson(baseUrl, method, fallbackPayload);
+  }
+
+  return primary;
 }
 
 async function sendTelegramMessageWithFallback(
