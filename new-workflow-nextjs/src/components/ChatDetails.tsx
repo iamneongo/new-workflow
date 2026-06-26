@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatEntry, AutomationSetup } from '@/lib/database';
+import { ChatEntry, AutomationSetup, TopicEntry } from '@/lib/database';
 
 interface ChatDetailsProps {
   automation: AutomationSetup | null;
@@ -56,7 +56,7 @@ export default function ChatDetails({
   const [tokenInput, setTokenInput] = useState('');
   
   const [sourceGroupIdInput, setSourceGroupIdInput] = useState('');
-  const [sourceThreadIdInput, setSourceThreadIdInput] = useState<number | ''>('');
+  const [sourceThreadIdsInput, setSourceThreadIdsInput] = useState<number[]>([]);
 
   const [approvalGroupIdInput, setApprovalGroupIdInput] = useState('');
   const [approvalThreadIdInput, setApprovalThreadIdInput] = useState<number | ''>('');
@@ -113,7 +113,11 @@ export default function ChatDetails({
       setTokenInput(automation.botToken);
       
       setSourceGroupIdInput(automation.sourceGroupId || '');
-      setSourceThreadIdInput(automation.sourceThreadId !== null && automation.sourceThreadId !== undefined ? automation.sourceThreadId : '');
+      setSourceThreadIdsInput(Array.isArray(automation.sourceThreadIds)
+        ? automation.sourceThreadIds
+        : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
+          ? [automation.sourceThreadId]
+          : []);
 
       setApprovalGroupIdInput(automation.approvalGroupId || '');
       setApprovalThreadIdInput(automation.approvalThreadId !== null && automation.approvalThreadId !== undefined ? automation.approvalThreadId : '');
@@ -213,7 +217,8 @@ export default function ChatDetails({
       const updates: Partial<AutomationSetup> & { id: string } = { id: automation!.id };
       if (field === 'source') {
         updates.sourceGroupId = sourceGroupIdInput;
-        updates.sourceThreadId = sourceThreadIdInput === '' ? null : Number(sourceThreadIdInput);
+        updates.sourceThreadIds = sourceThreadIdsInput;
+        updates.sourceThreadId = sourceThreadIdsInput[0] ?? null;
       }
       if (field === 'bot') {
         updates.botToken = tokenInput.trim();
@@ -282,11 +287,67 @@ export default function ChatDetails({
 
   const chatList = Object.values(chats).sort((a, b) => a.chatTitle.localeCompare(b.chatTitle));
 
-  const getGroupTopicLabel = (groupId: string, threadId: number | null) => {
+  const renderSourceGroupTopicBadge = (groupId: string, threadIds: number[]) => {
     const chat = chats[groupId];
-    if (!chat) return groupId ? `🟢 ID: ${groupId}` : '';
-    const topic = threadId !== null ? chat.topics[threadId] : null;
-    return `🟢 ${chat.chatTitle}${topic ? ` > ${topic.topicIcon} ${topic.topicName}` : ''}`;
+    if (!chat) {
+      return groupId ? <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>🟢 ID: {groupId}</span> : null;
+    }
+
+    const selectedTopics = threadIds
+      .map((threadId) => chat.topics[threadId])
+      .filter((topic): topic is TopicEntry => Boolean(topic));
+    const chatTypeIcon = chat.chatType === 'supergroup' ? '🏛' : chat.chatType === 'channel' ? '📢' : '👥';
+
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', verticalAlign: 'middle' }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+          {chat.photoPath ? (
+            <img
+              src={chat.photoPath}
+              alt=""
+              style={{ width: '16px', height: '16px', borderRadius: '50%', objectFit: 'cover' }}
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+                const parent = (e.target as HTMLElement).parentElement;
+                if (parent && !parent.querySelector('.fallback-icon')) {
+                  const fallback = document.createElement('span');
+                  fallback.className = 'fallback-icon';
+                  fallback.textContent = chatTypeIcon;
+                  parent.insertBefore(fallback, e.target as HTMLElement);
+                }
+              }}
+            />
+          ) : (
+            <span>{chatTypeIcon}</span>
+          )}
+          <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{chat.chatTitle}</span>
+        </span>
+        {threadIds.length === 0 ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(34, 158, 217, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(34, 158, 217, 0.2)' }}>
+            <span>💬</span>
+            <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>Tất cả topic</span>
+          </span>
+        ) : (
+          <>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: '9px' }}>➔</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+              {selectedTopics.map((topic) => (
+                <span key={topic.threadId} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <span>{topic.topicIcon || '💬'}</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{topic.topicName}</span>
+                </span>
+              ))}
+              {threadIds.filter((threadId) => !chat.topics[threadId]).map((threadId) => (
+                <span key={threadId} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(245, 158, 11, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                  <span>💬</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>Topic #{threadId}</span>
+                </span>
+              ))}
+            </span>
+          </>
+        )}
+      </span>
+    );
   };
 
   const renderGroupTopicBadge = (groupId: string, threadId: number | null) => {
@@ -334,14 +395,16 @@ export default function ChatDetails({
 
   const renderGroupTopicSelector = (
     groupIdVal: string,
-    setGroupId: (v: string) => void,
-    threadIdVal: number | '',
-    setThreadId: (v: number | '') => void,
+    setGroupId: any,
+    threadIdVal: number | '' | number[],
+    setThreadId: any,
     onCancel: () => void,
     onSave: () => void
   ) => {
     const selectedChat = chats[groupIdVal];
     const topicsList = selectedChat ? Object.values(selectedChat.topics || {}).sort((a, b) => a.topicName.localeCompare(b.topicName)) : [];
+    const isMultiSelect = Array.isArray(threadIdVal);
+    const selectedThreadIds = isMultiSelect ? threadIdVal : [];
 
     const filteredChats = chatList.filter(c => 
       c.chatTitle.toLowerCase().includes(groupSearch.toLowerCase()) ||
@@ -467,7 +530,7 @@ export default function ChatDetails({
                         key={c.chatId}
                         onClick={() => {
                           setGroupId(c.chatId);
-                          setThreadId('');
+                          setThreadId(isMultiSelect ? [] : '');
                           setIsDropdownOpen(false);
                           setGroupSearch('');
                         }}
@@ -522,8 +585,8 @@ export default function ChatDetails({
           )}
         </div>
 
-        {/* Topic Selector - Hierarchical - only displays if group is selected AND group has topics */}
-        {topicsList.length > 0 && (
+        {/* Topic Selector - supports single or multi topic selection */}
+        {!isMultiSelect && topicsList.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Chọn Topic/Chủ đề:</label>
             <select
@@ -539,6 +602,77 @@ export default function ChatDetails({
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {isMultiSelect && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Chọn Topic/Chủ đề:</label>
+              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setThreadId(topicsList.map((t) => t.threadId))}
+                  style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
+                >
+                  Chọn tất cả
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setThreadId([])}
+                  style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
+                >
+                  Bỏ chọn
+                </button>
+              </div>
+            </div>
+
+            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+              Để trống = lắng nghe toàn bộ topic trong nhóm, bao gồm cả General.
+            </div>
+
+            {topicsList.length > 0 ? (
+              <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {topicsList.map((t) => {
+                  const checked = selectedThreadIds.includes(t.threadId);
+                  return (
+                    <label
+                      key={t.threadId}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        background: checked ? 'rgba(34, 158, 217, 0.08)' : 'transparent',
+                        border: checked ? '1px solid rgba(34, 158, 217, 0.2)' : '1px solid transparent',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const next = checked
+                            ? selectedThreadIds.filter((threadId) => threadId !== t.threadId)
+                            : [...selectedThreadIds, t.threadId];
+                          setThreadId(next);
+                        }}
+                        style={{ accentColor: 'var(--accent-blue)' }}
+                      />
+                      <span style={{ fontSize: '11px' }}>{t.topicIcon || '💬'}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text)', fontWeight: checked ? '600' : '400', flex: 1 }}>
+                        {t.topicName}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ padding: '10px', fontSize: '11px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '4px', background: 'var(--bg-secondary)' }}>
+                Nhóm này chưa có topic. Để trống selection để lắng nghe tất cả tin nhắn trong nhóm.
+              </div>
+            )}
           </div>
         )}
 
@@ -578,7 +712,7 @@ export default function ChatDetails({
             <div className="node-content">
               <span className="node-tag">Bước 1: Trigger</span>
               <h5 className="node-title">Lắng nghe nhóm nguồn</h5>
-              <p className="node-text">Userbot theo dõi mọi tin nhắn mới trong nhóm công trình được chọn.</p>
+              <p className="node-text">Userbot theo dõi mọi tin nhắn mới trong nhóm công trình và các topic đã chọn.</p>
             </div>
           </div>
 
@@ -893,21 +1027,21 @@ export default function ChatDetails({
             <div className="node-icon">📡</div>
             <div className="node-content">
               <span className="node-tag">Bước 1: Trigger</span>
-              <h5 className="node-title">Lắng nghe nhóm nguồn</h5>
+              <h5 className="node-title">Lắng nghe nhóm nguồn và nhiều topic</h5>
               
               {editCard === 'source' ? (
                 renderGroupTopicSelector(
                   sourceGroupIdInput,
                   setSourceGroupIdInput,
-                  sourceThreadIdInput,
-                  setSourceThreadIdInput,
+                  sourceThreadIdsInput,
+                  (v: number | '' | number[]) => setSourceThreadIdsInput(Array.isArray(v) ? v : []),
                   () => setEditCard(null),
                   () => handleSaveCard('source')
                 )
               ) : (
                 <p className="node-text" style={{ fontWeight: '500' }}>
                   {automation.sourceGroupId ? (
-                    renderGroupTopicBadge(automation.sourceGroupId, automation.sourceThreadId)
+                    renderSourceGroupTopicBadge(automation.sourceGroupId, automation.sourceThreadIds)
                   ) : (
                     <span style={{ color: '#f59e0b' }}>⚠️ Nhấp vào đây để chọn nhóm nguồn Telegram.</span>
                   )}
@@ -1197,5 +1331,3 @@ export default function ChatDetails({
     </div>
   );
 }
-
-

@@ -31,6 +31,45 @@ export function normalizeThreadId(value: unknown): number | null {
   return parsed;
 }
 
+export function normalizeThreadIds(value: unknown): number[] {
+  if (value === null || value === undefined || value === '') {
+    return [];
+  }
+
+  const rawValues = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? (() => {
+          const trimmed = value.trim();
+          if (!trimmed) return [];
+          if (trimmed.startsWith('[')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (Array.isArray(parsed)) return parsed;
+            } catch {
+              // Fall through to treat the string as a single value.
+            }
+          }
+          return trimmed.split(',').map((item) => item.trim()).filter(Boolean);
+        })()
+      : [value];
+
+  const normalized = rawValues
+    .map((item) => normalizeThreadId(item))
+    .filter((item): item is number => item !== null);
+
+  return Array.from(new Set(normalized));
+}
+
+function readStoredThreadIds(threadIdsValue: unknown, legacyThreadId: unknown): number[] {
+  if (threadIdsValue !== null && threadIdsValue !== undefined) {
+    return normalizeThreadIds(threadIdsValue);
+  }
+
+  const legacy = normalizeThreadId(legacyThreadId);
+  return legacy !== null ? [legacy] : [];
+}
+
 export interface TopicEntry {
   threadId: number;
   topicName: string;
@@ -53,6 +92,7 @@ export interface AutomationSetup {
   name: string;
   botToken: string;
   sourceGroupId: string;
+  sourceThreadIds: number[];
   sourceThreadId: number | null;
   approvalGroupId: string;
   approvalThreadId: number | null;
@@ -109,19 +149,21 @@ export async function ensureDatabase(): Promise<void> {
     await client.query(`
       CREATE TABLE IF NOT EXISTS automation_setups (
         id VARCHAR(100) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        bot_token VARCHAR(255),
-        source_group_id VARCHAR(100),
-        dest_group_id VARCHAR(100),
-        is_listening BOOLEAN DEFAULT FALSE NOT NULL,
-        forward_count INTEGER DEFAULT 0 NOT NULL,
-        last_forward_time BIGINT
+      name VARCHAR(255) NOT NULL,
+      bot_token VARCHAR(255),
+      source_group_id VARCHAR(100),
+      source_thread_ids INTEGER[],
+      dest_group_id VARCHAR(100),
+      is_listening BOOLEAN DEFAULT FALSE NOT NULL,
+      forward_count INTEGER DEFAULT 0 NOT NULL,
+      last_forward_time BIGINT
       );
     `);
 
     // Add new columns to automation_setups if they don't exist
     const alterQueries = [
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_ids INTEGER[]',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
@@ -136,6 +178,12 @@ export async function ensureDatabase(): Promise<void> {
     for (const q of alterQueries) {
       await client.query(q);
     }
+
+    await client.query(`
+      UPDATE automation_setups
+      SET source_thread_ids = ARRAY[source_thread_id]
+      WHERE source_thread_ids IS NULL AND source_thread_id IS NOT NULL
+    `);
 
     // Create workflow_logs table
     await client.query(`
@@ -300,6 +348,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   name: 'Automation mới',
   botToken: '',
   sourceGroupId: '',
+  sourceThreadIds: [],
   sourceThreadId: null,
   approvalGroupId: '',
   approvalThreadId: null,
@@ -326,27 +375,31 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
     await ensureDatabase();
     const globalToken = await loadGlobalBotToken();
     const res = await p.query('SELECT * FROM automation_setups ORDER BY name ASC');
-    return res.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      botToken: globalToken,
-      sourceGroupId: row.source_group_id || '',
-      sourceThreadId: normalizeThreadId(row.source_thread_id),
-      approvalGroupId: row.approval_group_id || '',
-      approvalThreadId: normalizeThreadId(row.approval_thread_id),
-      supplyGroupId: row.supply_group_id || '',
-      supplyThreadId: normalizeThreadId(row.supply_thread_id),
-      deliveryGroupId: row.delivery_group_id || '',
-      deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
-      finalGroupId: row.final_group_id || '',
-      finalThreadId: normalizeThreadId(row.final_thread_id),
-      rejectGroupId: row.reject_group_id || '',
-      rejectThreadId: normalizeThreadId(row.reject_thread_id),
-      isListening: row.is_listening,
-      forwardCount: row.forward_count,
-      lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
-      destGroupId: row.dest_group_id || '',
-    }));
+    return res.rows.map((row) => {
+      const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
+      return {
+        id: row.id,
+        name: row.name,
+        botToken: globalToken,
+        sourceGroupId: row.source_group_id || '',
+        sourceThreadIds,
+        sourceThreadId: sourceThreadIds[0] ?? null,
+        approvalGroupId: row.approval_group_id || '',
+        approvalThreadId: normalizeThreadId(row.approval_thread_id),
+        supplyGroupId: row.supply_group_id || '',
+        supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        deliveryGroupId: row.delivery_group_id || '',
+        deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
+        finalGroupId: row.final_group_id || '',
+        finalThreadId: normalizeThreadId(row.final_thread_id),
+        rejectGroupId: row.reject_group_id || '',
+        rejectThreadId: normalizeThreadId(row.reject_thread_id),
+        isListening: row.is_listening,
+        forwardCount: row.forward_count,
+        lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
+        destGroupId: row.dest_group_id || '',
+      };
+    });
   } catch (error) {
     console.error('Error loading automation setups from PostgreSQL:', error);
     return [];
@@ -364,12 +417,14 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
     const res = await p.query('SELECT * FROM automation_setups WHERE id = $1', [id]);
     if (res.rows.length === 0) return null;
     const row = res.rows[0];
+    const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
     return {
       id: row.id,
       name: row.name,
       botToken: globalToken,
       sourceGroupId: row.source_group_id || '',
-      sourceThreadId: normalizeThreadId(row.source_thread_id),
+      sourceThreadIds,
+      sourceThreadId: sourceThreadIds[0] ?? null,
       approvalGroupId: row.approval_group_id || '',
       approvalThreadId: normalizeThreadId(row.approval_thread_id),
       supplyGroupId: row.supply_group_id || '',
@@ -401,10 +456,16 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
     const current = await loadAutomationSetup(setup.id) || DEFAULT_AUTOMATION_SETUP(setup.id);
     const hasField = (key: keyof AutomationSetup) =>
       Object.prototype.hasOwnProperty.call(setup, key);
+    const sourceThreadIds = hasField('sourceThreadIds')
+      ? normalizeThreadIds(setup.sourceThreadIds)
+      : hasField('sourceThreadId')
+        ? normalizeThreadIds(setup.sourceThreadId)
+        : current.sourceThreadIds;
     const updated = {
       ...current,
       ...setup,
-      sourceThreadId: hasField('sourceThreadId') ? normalizeThreadId(setup.sourceThreadId) : current.sourceThreadId,
+      sourceThreadIds,
+      sourceThreadId: sourceThreadIds[0] ?? null,
       approvalThreadId: hasField('approvalThreadId') ? normalizeThreadId(setup.approvalThreadId) : current.approvalThreadId,
       supplyThreadId: hasField('supplyThreadId') ? normalizeThreadId(setup.supplyThreadId) : current.supplyThreadId,
       deliveryThreadId: hasField('deliveryThreadId') ? normalizeThreadId(setup.deliveryThreadId) : current.deliveryThreadId,
@@ -414,7 +475,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
 
     await p.query(`
         INSERT INTO automation_setups (
-        id, name, source_group_id, source_thread_id,
+        id, name, source_group_id, source_thread_id, source_thread_ids,
         approval_group_id, approval_thread_id,
         supply_group_id, supply_thread_id,
         delivery_group_id, delivery_thread_id,
@@ -422,11 +483,12 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
         source_thread_id = EXCLUDED.source_thread_id,
+        source_thread_ids = EXCLUDED.source_thread_ids,
         approval_group_id = EXCLUDED.approval_group_id,
         approval_thread_id = EXCLUDED.approval_thread_id,
         supply_group_id = EXCLUDED.supply_group_id,
@@ -446,6 +508,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.name,
       updated.sourceGroupId,
       updated.sourceThreadId,
+      updated.sourceThreadIds,
       updated.approvalGroupId,
       updated.approvalThreadId,
       updated.supplyGroupId,
@@ -492,27 +555,31 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
     await ensureDatabase();
     const globalToken = await loadGlobalBotToken();
     const res = await p.query('SELECT * FROM automation_setups WHERE is_listening = true');
-    return res.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      botToken: globalToken,
-      sourceGroupId: row.source_group_id || '',
-      sourceThreadId: normalizeThreadId(row.source_thread_id),
-      approvalGroupId: row.approval_group_id || '',
-      approvalThreadId: normalizeThreadId(row.approval_thread_id),
-      supplyGroupId: row.supply_group_id || '',
-      supplyThreadId: normalizeThreadId(row.supply_thread_id),
-      deliveryGroupId: row.delivery_group_id || '',
-      deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
-      finalGroupId: row.final_group_id || '',
-      finalThreadId: normalizeThreadId(row.final_thread_id),
-      rejectGroupId: row.reject_group_id || '',
-      rejectThreadId: normalizeThreadId(row.reject_thread_id),
-      isListening: row.is_listening,
-      forwardCount: row.forward_count,
-      lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
-      destGroupId: row.dest_group_id || '',
-    }));
+    return res.rows.map((row) => {
+      const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
+      return {
+        id: row.id,
+        name: row.name,
+        botToken: globalToken,
+        sourceGroupId: row.source_group_id || '',
+        sourceThreadIds,
+        sourceThreadId: sourceThreadIds[0] ?? null,
+        approvalGroupId: row.approval_group_id || '',
+        approvalThreadId: normalizeThreadId(row.approval_thread_id),
+        supplyGroupId: row.supply_group_id || '',
+        supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        deliveryGroupId: row.delivery_group_id || '',
+        deliveryThreadId: normalizeThreadId(row.delivery_thread_id),
+        finalGroupId: row.final_group_id || '',
+        finalThreadId: normalizeThreadId(row.final_thread_id),
+        rejectGroupId: row.reject_group_id || '',
+        rejectThreadId: normalizeThreadId(row.reject_thread_id),
+        isListening: row.is_listening,
+        forwardCount: row.forward_count,
+        lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
+        destGroupId: row.dest_group_id || '',
+      };
+    });
   } catch (error) {
     console.error('Error fetching active automation setups:', error);
     return [];

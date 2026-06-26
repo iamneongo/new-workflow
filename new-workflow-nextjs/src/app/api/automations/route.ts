@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { 
-      id, name, botToken, sourceGroupId, sourceThreadId,
+      id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
       approvalGroupId, approvalThreadId,
       supplyGroupId, supplyThreadId,
       deliveryGroupId, deliveryThreadId,
@@ -63,7 +63,11 @@ export async function POST(req: NextRequest) {
     const updates: Partial<AutomationSetup> & { id: string } = { id };
     if (name !== undefined) updates.name = name;
     if (sourceGroupId !== undefined) updates.sourceGroupId = sourceGroupId;
-    if (sourceThreadId !== undefined) updates.sourceThreadId = normalizeThreadId(sourceThreadId);
+    if (sourceThreadIds !== undefined) {
+      updates.sourceThreadIds = sourceThreadIds;
+    } else if (sourceThreadId !== undefined) {
+      updates.sourceThreadId = normalizeThreadId(sourceThreadId);
+    }
     if (approvalGroupId !== undefined) updates.approvalGroupId = approvalGroupId;
     if (approvalThreadId !== undefined) updates.approvalThreadId = normalizeThreadId(approvalThreadId);
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;

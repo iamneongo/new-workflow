@@ -34,6 +34,7 @@ export interface ActiveListener {
   automationId: string;
   botToken: string;
   sourceGroupId: string;
+  sourceThreadIds: number[];
   sourceThreadId: number | null;
   normalizedSourceId: string;
   approvalGroupId: string;
@@ -127,6 +128,7 @@ export async function autoStartFromConfig(): Promise<void> {
           automationId: setup.id,
           botToken: globalToken,
           sourceGroupId: setup.sourceGroupId,
+          sourceThreadIds: setup.sourceThreadIds,
           sourceThreadId: setup.sourceThreadId,
           normalizedSourceId: normalized,
           approvalGroupId: setup.approvalGroupId,
@@ -473,11 +475,13 @@ async function ensureGlobalHandlerRegistered(): Promise<void> {
           const msgThreadId = normalizeThreadId(
             msgReplyTo?.replyToTopId ?? msgReplyTo?.replyToMsgId
           );
-          const configuredThreadId = normalizeThreadId(listener.sourceThreadId);
-          if (configuredThreadId !== null) {
-            if (msgThreadId !== configuredThreadId) {
-              continue; // Thread doesn't match, skip.
-            }
+          const configuredThreadIds = listener.sourceThreadIds.length > 0
+            ? listener.sourceThreadIds
+            : listener.sourceThreadId !== null
+              ? [listener.sourceThreadId]
+              : [];
+          if (configuredThreadIds.length > 0 && (msgThreadId === null || !configuredThreadIds.includes(msgThreadId))) {
+            continue; // Thread doesn't match, skip.
           }
 
           console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${msgThreadId})`);
@@ -626,6 +630,7 @@ export async function startListenerForAutomation(automationId: string): Promise<
     automationId,
     botToken,
     sourceGroupId: setup.sourceGroupId,
+    sourceThreadIds: setup.sourceThreadIds,
     sourceThreadId: setup.sourceThreadId,
     normalizedSourceId: normalized,
     approvalGroupId: setup.approvalGroupId,
