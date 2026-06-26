@@ -352,7 +352,8 @@ export default function Dashboard() {
         setSelectedAutomationId(newId);
         setDetailsTab('config');
       } else {
-        alert('Tạo automation mới thất bại');
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Tạo automation mới thất bại');
       }
     } catch {
       alert('Lỗi kết nối khi tạo automation');

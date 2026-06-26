@@ -2,6 +2,45 @@ import { Pool } from 'pg';
 
 let pool: Pool | null = null;
 
+function resolveConnectionString(): string {
+  const candidates = [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL_NON_POOLING,
+    process.env.POSTGRES_URL,
+    process.env.SUPABASE_DATABASE_URL,
+    process.env.NEON_DATABASE_URL,
+    process.env.PG_CONNECTION_STRING,
+  ].filter((value): value is string => !!value && value.trim().length > 0);
+
+  const connectionString = candidates[0];
+  if (!connectionString) {
+    throw new Error(
+      'Missing database connection string. Set DATABASE_URL or a supported Postgres env var.'
+    );
+  }
+
+  let hostname = '';
+  try {
+    hostname = new URL(connectionString).hostname.toLowerCase();
+  } catch {
+    throw new Error(
+      'DATABASE_URL must be a full Postgres connection string like postgres://user:pass@host:5432/db'
+    );
+  }
+
+  if (!hostname) {
+    throw new Error('DATABASE_URL is missing a hostname.');
+  }
+
+  if (hostname === 'base') {
+    throw new Error(
+      'DATABASE_URL points to host "base". Replace it with your real Postgres host in Vercel env vars.'
+    );
+  }
+
+  return connectionString;
+}
+
 function shouldUseSsl(connectionString: string): boolean {
   try {
     const host = new URL(connectionString).hostname.toLowerCase();
@@ -13,10 +52,7 @@ function shouldUseSsl(connectionString: string): boolean {
 
 export function getPool(): Pool {
   if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-      throw new Error('DATABASE_URL is not defined in environment variables.');
-    }
+    const connectionString = resolveConnectionString();
     const config: ConstructorParameters<typeof Pool>[0] = {
       connectionString,
     };
@@ -696,6 +732,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       : hasField('sourceThreadId')
         ? normalizeThreadIds(setup.sourceThreadId)
         : current.sourceThreadIds;
+    const storedSourceThreadIds = sourceThreadIds.length > 0 ? sourceThreadIds : null;
     const updated = {
       ...current,
       ...setup,
@@ -767,7 +804,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.name,
       updated.sourceGroupId,
       updated.sourceThreadId,
-      updated.sourceThreadIds,
+      storedSourceThreadIds,
       updated.approvalGroupId,
       updated.approvalThreadId,
       updated.approvalMessageMode,
