@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { TopicEntry } from '@/lib/database';
+import type { TopicEntry } from '@/lib/automation-types';
 
 interface TopicCardProps {
   topic: TopicEntry;

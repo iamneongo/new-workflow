@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { ChatEntry, AutomationSetup } from '@/lib/database';
+import type { ChatEntry, AutomationSetup } from '@/lib/automation-types';
 import ChatsList from './ChatsList';
 import ChatDetails from './ChatDetails';
 import RenameModal from './RenameModal';

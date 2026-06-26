@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatEntry, AutomationSetup, TopicEntry, DEFAULT_APPROVAL_CUSTOM_MESSAGE, ApprovalMessageMode } from '@/lib/database';
+import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode } from '@/lib/automation-types';
+import { DEFAULT_APPROVAL_CUSTOM_MESSAGE } from '@/lib/automation-types';
 
 interface ChatDetailsProps {
   automation: AutomationSetup | null;

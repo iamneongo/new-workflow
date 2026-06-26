@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ChatEntry, AutomationSetup } from '@/lib/database';
+import type { ChatEntry, AutomationSetup } from '@/lib/automation-types';
 
 interface ChatsListProps {
   automations: AutomationSetup[];
