@@ -380,12 +380,13 @@ export async function loadDatabase(): Promise<Database> {
     const chats: Record<string, ChatEntry> = {};
     
     for (const row of chatsRes.rows) {
+      const rawPhotoPath = typeof row.photo_path === 'string' ? row.photo_path : null;
       chats[row.chat_id] = {
         chatId: row.chat_id,
         chatTitle: row.chat_title,
         chatType: row.chat_type as any,
         username: row.username,
-        photoPath: row.photo_path,
+        photoPath: rawPhotoPath && !rawPhotoPath.startsWith('/photos/') ? rawPhotoPath : null,
         lastUpdated: Number(row.last_updated),
         topics: {}
       };
@@ -419,6 +420,7 @@ export async function saveDatabase(database: Database): Promise<void> {
     await client.query('BEGIN');
     
     for (const chat of Object.values(database.chats)) {
+      const photoPath = chat.photoPath && !chat.photoPath.startsWith('/photos/') ? chat.photoPath : null;
       await client.query(`
         INSERT INTO chats (chat_id, chat_title, chat_type, username, photo_path, last_updated)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -428,7 +430,7 @@ export async function saveDatabase(database: Database): Promise<void> {
           username = EXCLUDED.username,
           photo_path = EXCLUDED.photo_path,
           last_updated = EXCLUDED.last_updated
-      `, [chat.chatId, chat.chatTitle, chat.chatType, chat.username, chat.photoPath, chat.lastUpdated]);
+      `, [chat.chatId, chat.chatTitle, chat.chatType, chat.username, photoPath, chat.lastUpdated]);
       
       for (const topic of Object.values(chat.topics)) {
         await client.query(`
@@ -487,6 +489,68 @@ export async function saveGlobalBotToken(token: string): Promise<void> {
     console.error('Error saving global bot token:', error);
     throw error;
   }
+}
+
+/**
+ * Loads a string value from global settings.
+ */
+export async function loadGlobalSetting(key: string): Promise<string> {
+  const p = getPool();
+  try {
+    await ensureDatabase();
+    const res = await p.query('SELECT value FROM global_settings WHERE key = $1', [key]);
+    if (res.rows.length === 0) return '';
+    return res.rows[0].value ?? '';
+  } catch (error) {
+    console.error(`Error loading global setting "${key}":`, error);
+    return '';
+  }
+}
+
+/**
+ * Saves a string value to global settings.
+ */
+export async function saveGlobalSetting(key: string, value: string): Promise<void> {
+  const p = getPool();
+  try {
+    await ensureDatabase();
+    await p.query(`
+      INSERT INTO global_settings (key, value)
+      VALUES ($1, $2)
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `, [key, value]);
+  } catch (error) {
+    console.error(`Error saving global setting "${key}":`, error);
+    throw error;
+  }
+}
+
+/**
+ * Removes a string value from global settings.
+ */
+export async function deleteGlobalSetting(key: string): Promise<void> {
+  const p = getPool();
+  try {
+    await ensureDatabase();
+    await p.query('DELETE FROM global_settings WHERE key = $1', [key]);
+  } catch (error) {
+    console.error(`Error deleting global setting "${key}":`, error);
+    throw error;
+  }
+}
+
+export const TELEGRAM_SESSION_SETTING_KEY = 'telegram_session_string';
+
+export async function loadTelegramSessionString(): Promise<string> {
+  return loadGlobalSetting(TELEGRAM_SESSION_SETTING_KEY);
+}
+
+export async function saveTelegramSessionString(sessionString: string): Promise<void> {
+  await saveGlobalSetting(TELEGRAM_SESSION_SETTING_KEY, sessionString);
+}
+
+export async function deleteTelegramSessionString(): Promise<void> {
+  await deleteGlobalSetting(TELEGRAM_SESSION_SETTING_KEY);
 }
 
 // ---------------------------------------------------------------------------

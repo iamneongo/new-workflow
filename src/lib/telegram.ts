@@ -1,12 +1,12 @@
 import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
-import fs from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
-import { loadDatabase, saveDatabase } from './database';
-
-const sessionFilePath = path.join(process.cwd(), 'data', 'session.txt');
-const photosDir = path.join(process.cwd(), 'public', 'photos');
+import {
+  loadDatabase,
+  saveDatabase,
+  loadTelegramSessionString,
+  saveTelegramSessionString,
+  deleteTelegramSessionString,
+} from './database';
 
 const apiId = parseInt(process.env.API_ID || '0');
 const apiHash = process.env.API_HASH || '';
@@ -139,11 +139,9 @@ export async function logoutTelegramClient(): Promise<void> {
     }
 
     try {
-      await fs.unlink(sessionFilePath);
+      await deleteTelegramSessionString();
     } catch (err: any) {
-      if (err?.code !== 'ENOENT') {
-        console.warn('[Telegram Logout] Failed to remove session file:', err?.message || err);
-      }
+      console.warn('[Telegram Logout] Failed to remove session data:', err?.message || err);
     }
 
     sendSseUpdate({ type: 'loggedOut' });
@@ -178,14 +176,7 @@ async function _initTelegramClient(): Promise<TelegramClient> {
     throw new Error('API_ID và API_HASH chưa được cấu hình trong .env.local');
   }
 
-  // Ensure dirs exist
-  await fs.mkdir(path.join(process.cwd(), 'data'), { recursive: true });
-  await fs.mkdir(photosDir, { recursive: true });
-
-  let savedSession = '';
-  if (existsSync(sessionFilePath)) {
-    savedSession = await fs.readFile(sessionFilePath, 'utf8');
-  }
+  const savedSession = await loadTelegramSessionString();
 
   const stringSession = new StringSession(savedSession);
 
@@ -212,9 +203,9 @@ async function _initTelegramClient(): Promise<TelegramClient> {
     },
   });
 
-  // Save session
+  // Save session in PostgreSQL so it survives Vercel's ephemeral filesystem.
   const sessionString = client.session.save() as unknown as string;
-  await fs.writeFile(sessionFilePath, sessionString, 'utf8');
+  await saveTelegramSessionString(sessionString);
 
   global.__telegramClient = client;
   global.__telegramConnected = true;
@@ -288,20 +279,10 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
 
       const chatEntry = db.chats[chatId];
 
-      // Download profile photo if not cached
-      if (!chatEntry.photoPath && entity.photo) {
-        try {
-          const buffer = await client.downloadProfilePhoto(entity) as Buffer | null;
-          if (buffer && buffer.length > 0) {
-            const localFileName = `${chatId}.jpg`;
-            const localFilePath = path.join(photosDir, localFileName);
-            await fs.writeFile(localFilePath, buffer);
-            chatEntry.photoPath = `/photos/${localFileName}`;
-            console.log(`[Sync] Đã tải ảnh đại diện: ${chatEntry.chatTitle}`);
-          }
-        } catch (photoError: any) {
-          console.error(`[Sync] Không thể tải ảnh ${chatEntry.chatTitle}:`, photoError.message);
-        }
+      // Vercel's runtime filesystem is ephemeral, so we do not cache photos on disk.
+      // The UI already falls back to an icon when photoPath is null.
+      if (chatEntry.photoPath?.startsWith('/photos/')) {
+        chatEntry.photoPath = null;
       }
 
       // Fetch forum topics for supergroups
