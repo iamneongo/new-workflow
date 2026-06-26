@@ -1385,7 +1385,8 @@ export default function ChatDetails({
                 </div>
                 <div 
                   id="tour-node-reject"
-                  className={`workflow-node end-node${editCard === 'reject' ? ' editing' : ''}${isCardUnconfigured('reject') ? ' unconfigured' : ''}`}
+                  className={`workflow-node end-node interactive-node${editCard === 'reject' ? ' editing' : ''}${isCardUnconfigured('reject') ? ' unconfigured' : ''}`}
+                  onClick={() => { if (editCard !== 'reject') setEditCard('reject'); }}
                   style={{ opacity: 0.95 }}
                 >
                   <div className="node-icon">❌</div>

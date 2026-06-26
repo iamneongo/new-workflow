@@ -442,15 +442,22 @@ async function handleBotUpdate(update: any) {
           });
 
           // Send reject notification
-          if (!autoSetup.rejectGroupId) {
-            console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject notification.`);
-            await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo từ chối.', 'callback reject missing group');
+          const rejectTarget = resolveApprovalRejectTarget(autoSetup);
+          if (!rejectTarget.groupId) {
+            console.warn(`[BotListener] Reject target is not configured for automation: ${log.automation_id}.`);
+            await updateCallbackStatus('❌ Chưa có nhóm nào để nhận thông báo từ chối.', 'callback reject missing group');
             return;
+          }
+          if (rejectTarget.usedFallback) {
+            emitListenerLog('warn', 'Chưa cấu hình nhóm từ chối riêng, dùng nhóm phê duyệt làm nơi nhận thông báo từ chối.', {
+              automationId: log.automation_id,
+              step: 'approval',
+            });
           }
           const rejectText = `❌ *THÔNG BÁO TỪ CHỐI PHÊ DUYỆT*\n\nYêu cầu vật tư đã bị từ chối phê duyệt bởi ${userFullName}.\nNội dung: ${log.original_text || '[Media]'}`;
           await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: autoSetup.rejectGroupId,
-            message_thread_id: autoSetup.rejectThreadId || undefined,
+            chat_id: rejectTarget.groupId,
+            message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
 
@@ -692,17 +699,24 @@ async function handleBotUpdate(update: any) {
         }
 
         // Send reject/change notification
-        if (!isChange && !autoSetup.rejectGroupId) {
-          console.warn(`[BotListener] Reject group is not configured for automation: ${log.automation_id}. Cannot send reject notification.`);
-          await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo từ chối.', 'callback missing reject group');
+        const rejectTarget = resolveSupplyRejectTarget(autoSetup, log);
+        if (!isChange && !rejectTarget.groupId) {
+          console.warn(`[BotListener] Reject target is not configured for automation: ${log.automation_id}.`);
+          await updateCallbackStatus('❌ Chưa có nhóm nào để nhận thông báo từ chối.', 'callback missing reject group');
           return;
+        }
+        if (!isChange && rejectTarget.usedFallback) {
+          emitListenerLog('warn', 'Chưa cấu hình nhóm từ chối riêng, dùng nhóm vật tư hiện tại làm nơi nhận thông báo từ chối.', {
+            automationId: log.automation_id,
+            step: 'supplier-select',
+          });
         }
         const rejectText = isChange
           ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 *Hãy REPLY trực tiếp vào tin nhắn này.* Bot sẽ chuyển nội dung phản hồi sang group đã cấu hình để mọi người cùng biết nhà cung ứng muốn thay đổi gì.`
           : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: isChange ? changeRequestGroupId : autoSetup.rejectGroupId,
-          message_thread_id: isChange ? changeRequestThreadId : (autoSetup.rejectThreadId || undefined),
+          chat_id: isChange ? changeRequestGroupId : rejectTarget.groupId,
+          message_thread_id: isChange ? changeRequestThreadId : (rejectTarget.threadId || undefined),
           text: rejectText,
         }, 'reject/change notice');
         if (isChange && rejectData.ok) {
@@ -1259,6 +1273,26 @@ function explainSupplierRoutingMatch(text: string): string {
 function normalizeComparableChatId(chatId: string | number | null | undefined): string {
   if (chatId === null || chatId === undefined) return '';
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
+}
+
+function resolveApprovalRejectTarget(autoSetup: any): { groupId: string; threadId: number | null; usedFallback: boolean } {
+  const groupId = autoSetup.rejectGroupId || autoSetup.approvalGroupId || '';
+  const threadId = autoSetup.rejectThreadId ?? autoSetup.approvalThreadId ?? null;
+  return {
+    groupId,
+    threadId,
+    usedFallback: !autoSetup.rejectGroupId && !!autoSetup.approvalGroupId,
+  };
+}
+
+function resolveSupplyRejectTarget(autoSetup: any, log: any): { groupId: string; threadId: number | null; usedFallback: boolean } {
+  const groupId = autoSetup.rejectGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId || '';
+  const threadId = autoSetup.rejectThreadId ?? log.selected_supplier_thread_id ?? autoSetup.supplyThreadId ?? null;
+  return {
+    groupId,
+    threadId,
+    usedFallback: !autoSetup.rejectGroupId && !!groupId,
+  };
 }
 
 function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
