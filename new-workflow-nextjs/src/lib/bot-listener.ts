@@ -1218,7 +1218,7 @@ async function resolveBotApiChatId(chatId: string): Promise<string> {
   if (!/^\d+$/.test(chatId)) return chatId;
 
   try {
-    const db = await loadDatabase();
+    const db = await loadDatabase(false);
     const chat = db.chats[chatId];
     if (chat?.chatType === 'group') {
       return `-${chatId}`;

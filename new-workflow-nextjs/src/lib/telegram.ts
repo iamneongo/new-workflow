@@ -6,6 +6,7 @@ import {
   loadTelegramSessionString,
   saveTelegramSessionString,
   deleteTelegramSessionString,
+  getChatPhotoUrl,
 } from './database';
 
 const apiId = parseInt(process.env.API_ID || '0');
@@ -102,6 +103,44 @@ export function resolveAuthInput(field: 'phone' | 'code' | 'password', value: st
  */
 export function isPendingAuth(field: 'phone' | 'code' | 'password'): boolean {
   return !!global.__authResolvers?.[field];
+}
+
+function detectImageMimeType(buffer: Buffer): string {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return 'image/png';
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  if (buffer.length >= 4 && buffer.toString('ascii', 0, 4) === 'GIF8') {
+    return 'image/gif';
+  }
+  return 'image/jpeg';
+}
+
+async function downloadChatPhotoData(client: TelegramClient, entity: any): Promise<{ photoData: string; photoMime: string } | null> {
+  try {
+    const raw = await client.downloadProfilePhoto(entity as any);
+    const buffer = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as any);
+    if (!buffer.length) {
+      return null;
+    }
+
+    return {
+      photoData: buffer.toString('base64'),
+      photoMime: detectImageMimeType(buffer),
+    };
+  } catch (error: any) {
+    console.warn('[Sync] Không tải được ảnh nhóm:', error?.message || error);
+    return null;
+  }
 }
 
 /**
@@ -267,6 +306,8 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
           chatType,
           username: entity.username || null,
           photoPath: null,
+          photoData: null,
+          photoMime: null,
           lastUpdated: Date.now(),
           topics: {},
         };
@@ -278,11 +319,25 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
       }
 
       const chatEntry = db.chats[chatId];
+      const hasProfilePhoto = !!entity?.photo;
+      if (hasProfilePhoto) {
+        if (!chatEntry.photoData) {
+          const downloaded = await downloadChatPhotoData(client, entity);
+          if (downloaded) {
+            chatEntry.photoData = downloaded.photoData;
+            chatEntry.photoMime = downloaded.photoMime;
+          }
+        }
 
-      // Vercel's runtime filesystem is ephemeral, so we do not cache photos on disk.
-      // The UI already falls back to an icon when photoPath is null.
-      if (chatEntry.photoPath?.startsWith('/photos/')) {
+        if (chatEntry.photoData) {
+          chatEntry.photoPath = getChatPhotoUrl(chatId, chatEntry.lastUpdated);
+        } else {
+          chatEntry.photoPath = null;
+        }
+      } else {
         chatEntry.photoPath = null;
+        chatEntry.photoData = null;
+        chatEntry.photoMime = null;
       }
 
       // Fetch forum topics for supergroups

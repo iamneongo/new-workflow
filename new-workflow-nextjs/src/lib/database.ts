@@ -195,6 +195,8 @@ export interface ChatEntry {
   chatType: 'group' | 'channel' | 'supergroup';
   username: string | null;
   photoPath: string | null;
+  photoData: string | null;
+  photoMime: string | null;
   lastUpdated: number;
   topics: Record<string, TopicEntry>;
 }
@@ -233,6 +235,10 @@ export interface Database {
   chats: Record<string, ChatEntry>;
 }
 
+export function getChatPhotoUrl(chatId: string, lastUpdated: number): string {
+  return `/api/chats/${encodeURIComponent(chatId)}/photo?v=${encodeURIComponent(String(lastUpdated))}`;
+}
+
 /**
  * Ensures the database tables exist in PostgreSQL.
  */
@@ -248,6 +254,8 @@ export async function ensureDatabase(): Promise<void> {
         chat_type VARCHAR(50) NOT NULL,
         username VARCHAR(255),
         photo_path VARCHAR(255),
+        photo_data TEXT,
+        photo_mime VARCHAR(100),
         last_updated BIGINT NOT NULL
       );
     `);
@@ -317,7 +325,9 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_group_id VARCHAR(100)',
-      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_thread_id INTEGER'
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_thread_id INTEGER',
+      'ALTER TABLE chats ADD COLUMN IF NOT EXISTS photo_data TEXT',
+      'ALTER TABLE chats ADD COLUMN IF NOT EXISTS photo_mime VARCHAR(100)'
     ];
     for (const q of alterQueries) {
       await client.query(q);
@@ -405,25 +415,40 @@ export async function ensureDatabase(): Promise<void> {
 /**
  * Loads the database structure (chats and topics) from PostgreSQL.
  */
-export async function loadDatabase(): Promise<Database> {
+export async function loadDatabase(includePhotoData = true): Promise<Database> {
   const p = getPool();
   try {
     await ensureDatabase();
     
-    const chatsRes = await p.query('SELECT * FROM chats');
+    const chatsRes = includePhotoData
+      ? await p.query('SELECT * FROM chats')
+      : await p.query('SELECT chat_id, chat_title, chat_type, username, photo_path, last_updated FROM chats');
     const topicsRes = await p.query('SELECT * FROM topics');
     
     const chats: Record<string, ChatEntry> = {};
     
     for (const row of chatsRes.rows) {
       const rawPhotoPath = typeof row.photo_path === 'string' ? row.photo_path : null;
+      const rawPhotoData = includePhotoData && typeof row.photo_data === 'string' && row.photo_data.length > 0
+        ? row.photo_data
+        : null;
+      const rawPhotoMime = includePhotoData && typeof row.photo_mime === 'string' && row.photo_mime.trim()
+        ? row.photo_mime.trim()
+        : null;
+      const lastUpdated = Number(row.last_updated);
       chats[row.chat_id] = {
         chatId: row.chat_id,
         chatTitle: row.chat_title,
         chatType: row.chat_type as any,
         username: row.username,
-        photoPath: rawPhotoPath && !rawPhotoPath.startsWith('/photos/') ? rawPhotoPath : null,
-        lastUpdated: Number(row.last_updated),
+        photoPath: rawPhotoData
+          ? getChatPhotoUrl(row.chat_id, lastUpdated)
+          : rawPhotoPath && rawPhotoPath.startsWith('/api/chats/')
+            ? rawPhotoPath
+            : null,
+        photoData: rawPhotoData,
+        photoMime: rawPhotoMime,
+        lastUpdated,
         topics: {}
       };
     }
@@ -456,17 +481,21 @@ export async function saveDatabase(database: Database): Promise<void> {
     await client.query('BEGIN');
     
     for (const chat of Object.values(database.chats)) {
-      const photoPath = chat.photoPath && !chat.photoPath.startsWith('/photos/') ? chat.photoPath : null;
+      const photoData = chat.photoData && chat.photoData.trim() ? chat.photoData : null;
+      const photoMime = photoData ? (chat.photoMime?.trim() || 'image/jpeg') : null;
+      const photoPath = photoData ? getChatPhotoUrl(chat.chatId, chat.lastUpdated) : null;
       await client.query(`
-        INSERT INTO chats (chat_id, chat_title, chat_type, username, photo_path, last_updated)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO chats (chat_id, chat_title, chat_type, username, photo_path, photo_data, photo_mime, last_updated)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (chat_id) DO UPDATE SET
           chat_title = EXCLUDED.chat_title,
           chat_type = EXCLUDED.chat_type,
           username = EXCLUDED.username,
           photo_path = EXCLUDED.photo_path,
+          photo_data = EXCLUDED.photo_data,
+          photo_mime = EXCLUDED.photo_mime,
           last_updated = EXCLUDED.last_updated
-      `, [chat.chatId, chat.chatTitle, chat.chatType, chat.username, photoPath, chat.lastUpdated]);
+      `, [chat.chatId, chat.chatTitle, chat.chatType, chat.username, photoPath, photoData, photoMime, chat.lastUpdated]);
       
       for (const topic of Object.values(chat.topics)) {
         await client.query(`

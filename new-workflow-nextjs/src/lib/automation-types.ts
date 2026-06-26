@@ -27,6 +27,8 @@ export interface ChatEntry {
   chatType: 'group' | 'channel' | 'supergroup';
   username: string | null;
   photoPath: string | null;
+  photoData?: string | null;
+  photoMime?: string | null;
   lastUpdated: number;
   topics: Record<string, TopicEntry>;
 }
