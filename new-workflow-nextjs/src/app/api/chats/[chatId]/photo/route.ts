@@ -6,10 +6,11 @@ export const runtime = 'nodejs';
 
 export async function GET(
   _request: Request,
-  { params }: any
+  context: any
 ) {
   try {
-    const chatId = decodeURIComponent(params.chatId);
+    const params = await Promise.resolve(context?.params);
+    const chatId = decodeURIComponent(String(params?.chatId || ''));
     await ensureDatabase();
     const pool = getPool();
     const result = await pool.query(
@@ -18,8 +19,18 @@ export async function GET(
     );
 
     const row = result.rows[0];
-    const photoData = typeof row?.photo_data === 'string' && row.photo_data.length > 0 ? row.photo_data : null;
-    if (!photoData) {
+    const rawPhotoData = row?.photo_data;
+    let buffer: Buffer | null = null;
+
+    if (Buffer.isBuffer(rawPhotoData)) {
+      buffer = rawPhotoData;
+    } else if (typeof rawPhotoData === 'string' && rawPhotoData.length > 0) {
+      buffer = Buffer.from(rawPhotoData, 'base64');
+    } else if (rawPhotoData instanceof Uint8Array && rawPhotoData.length > 0) {
+      buffer = Buffer.from(rawPhotoData);
+    }
+
+    if (!buffer || buffer.length === 0) {
       return NextResponse.json({ error: 'Photo not found' }, { status: 404 });
     }
 
@@ -27,9 +38,8 @@ export async function GET(
       typeof row?.photo_mime === 'string' && row.photo_mime.trim()
         ? row.photo_mime.trim()
         : 'image/jpeg';
-    const buffer = Buffer.from(photoData, 'base64');
 
-    return new Response(buffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
         'Content-Type': photoMime,
         'Cache-Control': 'public, max-age=31536000, immutable',
