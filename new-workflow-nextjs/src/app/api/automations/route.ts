@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     const {
       id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
       approvalGroupId, approvalThreadId, approvalMessageMode, approvalCustomMessage,
+      approvalActionConfig,
       supplyGroupId, supplyThreadId, supplyListenGroupId, supplyListenThreadIds, supplyListenThreadId, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
       deliveryGroupId, deliveryThreadId,
       finalMessageMode,
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
     if (approvalThreadId !== undefined) updates.approvalThreadId = normalizeThreadId(approvalThreadId);
     if (approvalMessageMode !== undefined) updates.approvalMessageMode = approvalMessageMode;
     if (approvalCustomMessage !== undefined) updates.approvalCustomMessage = approvalCustomMessage;
+    if (approvalActionConfig !== undefined) updates.approvalActionConfig = approvalActionConfig;
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;
     if (supplyThreadId !== undefined) updates.supplyThreadId = normalizeThreadId(supplyThreadId);
     if (supplyListenGroupId !== undefined) updates.supplyListenGroupId = supplyListenGroupId;

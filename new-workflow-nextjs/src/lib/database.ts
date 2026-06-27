@@ -89,6 +89,13 @@ export type FinalMessageMode = 'forward' | 'copy';
 
 export type SupplyChangeMessageMode = 'forward' | 'copy';
 
+export interface ApprovalActionConfig {
+  agreeButtonLabel: string;
+  disagreeButtonLabel: string;
+  agreeResultMessage: string;
+  disagreeResultMessage: string;
+}
+
 export interface SupplierRoute {
   id: string;
   name: string;
@@ -101,12 +108,48 @@ export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMod
   return value === 'copy' ? 'copy' : 'forward';
 }
 
+export function normalizeApprovalActionConfig(value: unknown): ApprovalActionConfig {
+  const fallback: ApprovalActionConfig = {
+    agreeButtonLabel: '👍 Đồng ý',
+    disagreeButtonLabel: '👎 Không đồng ý',
+    agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
+    disagreeResultMessage: '❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi {{userFullName}}',
+  };
+
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  const cfg = value as Partial<ApprovalActionConfig>;
+  return {
+    agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
+      ? cfg.agreeButtonLabel.trim()
+      : fallback.agreeButtonLabel,
+    disagreeButtonLabel: typeof cfg.disagreeButtonLabel === 'string' && cfg.disagreeButtonLabel.trim()
+      ? cfg.disagreeButtonLabel.trim()
+      : fallback.disagreeButtonLabel,
+    agreeResultMessage: typeof cfg.agreeResultMessage === 'string' && cfg.agreeResultMessage.trim()
+      ? cfg.agreeResultMessage.trim()
+      : fallback.agreeResultMessage,
+    disagreeResultMessage: typeof cfg.disagreeResultMessage === 'string' && cfg.disagreeResultMessage.trim()
+      ? cfg.disagreeResultMessage.trim()
+      : fallback.disagreeResultMessage,
+  };
+}
+
 export function normalizeSupplierRouteMode(value: unknown): SupplierRouteMode {
   return value === 'copy' ? 'copy' : 'forward';
 }
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+
+export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
+  agreeButtonLabel: '👍 Đồng ý',
+  disagreeButtonLabel: '👎 Không đồng ý',
+  agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
+  disagreeResultMessage: '❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi {{userFullName}}',
+};
 
 export function normalizeThreadIds(value: unknown): number[] {
   if (value === null || value === undefined || value === '') {
@@ -212,6 +255,7 @@ export interface AutomationSetup {
   approvalThreadId: number | null;
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
+  approvalActionConfig: ApprovalActionConfig;
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;
@@ -288,6 +332,7 @@ export async function ensureDatabase(): Promise<void> {
         approval_thread_id INTEGER,
         approval_message_mode VARCHAR(20),
         approval_custom_message TEXT,
+        approval_action_config JSONB,
         supply_group_id VARCHAR(100),
         supply_thread_id INTEGER,
         supply_listen_group_id VARCHAR(100),
@@ -319,6 +364,7 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_message_mode VARCHAR(20)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_custom_message TEXT',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_action_config JSONB',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_group_id VARCHAR(100)',
@@ -380,6 +426,17 @@ export async function ensureDatabase(): Promise<void> {
           approval_custom_message = COALESCE(approval_custom_message, $1)
       WHERE approval_message_mode IS NULL OR approval_custom_message IS NULL
     `, [DEFAULT_APPROVAL_CUSTOM_MESSAGE]);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET approval_action_config = COALESCE(approval_action_config, $1::jsonb)
+      WHERE approval_action_config IS NULL
+    `, [JSON.stringify({
+      agreeButtonLabel: '👍 Đồng ý',
+      disagreeButtonLabel: '👎 Không đồng ý',
+      agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
+      disagreeResultMessage: '❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi {{userFullName}}',
+    })]);
 
     await client.query(`
       UPDATE automation_setups
@@ -674,6 +731,12 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalThreadId: null,
   approvalMessageMode: 'forward',
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+  approvalActionConfig: {
+    agreeButtonLabel: '👍 Đồng ý',
+    disagreeButtonLabel: '👎 Không đồng ý',
+    agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
+    disagreeResultMessage: '❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi {{userFullName}}',
+  },
   supplyGroupId: '',
   supplyThreadId: null,
   supplyListenGroupId: '',
@@ -718,6 +781,7 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+        approvalActionConfig: normalizeApprovalActionConfig(row.approval_action_config),
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         supplyListenGroupId: row.supply_listen_group_id || '',
@@ -769,6 +833,7 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       approvalThreadId: normalizeThreadId(row.approval_thread_id),
       approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
       approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+      approvalActionConfig: normalizeApprovalActionConfig(row.approval_action_config),
       supplyGroupId: row.supply_group_id || '',
       supplyThreadId: normalizeThreadId(row.supply_thread_id),
       supplyListenGroupId: row.supply_listen_group_id || '',
@@ -823,6 +888,9 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       approvalCustomMessage: hasField('approvalCustomMessage')
         ? (typeof setup.approvalCustomMessage === 'string' ? setup.approvalCustomMessage : String(setup.approvalCustomMessage ?? ''))
         : current.approvalCustomMessage,
+      approvalActionConfig: hasField('approvalActionConfig')
+        ? normalizeApprovalActionConfig(setup.approvalActionConfig)
+        : current.approvalActionConfig,
       supplierRoutes: hasField('supplierRoutes')
         ? normalizeSupplierRoutes(setup.supplierRoutes)
         : current.supplierRoutes,
@@ -857,14 +925,14 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
     await p.query(`
         INSERT INTO automation_setups (
         id, name, source_group_id, source_thread_id, source_thread_ids,
-        approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message,
+        approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message, approval_action_config,
         supply_group_id, supply_thread_id, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
@@ -874,6 +942,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         approval_thread_id = EXCLUDED.approval_thread_id,
         approval_message_mode = EXCLUDED.approval_message_mode,
         approval_custom_message = EXCLUDED.approval_custom_message,
+        approval_action_config = EXCLUDED.approval_action_config,
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
         supply_listen_group_id = EXCLUDED.supply_listen_group_id,
@@ -904,6 +973,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.approvalThreadId,
       updated.approvalMessageMode,
       updated.approvalCustomMessage,
+      JSON.stringify(updated.approvalActionConfig),
       updated.supplyGroupId,
       updated.supplyThreadId,
       updated.supplyListenGroupId,
@@ -969,6 +1039,7 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+        approvalActionConfig: normalizeApprovalActionConfig(row.approval_action_config),
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         supplyListenGroupId: row.supply_listen_group_id || '',

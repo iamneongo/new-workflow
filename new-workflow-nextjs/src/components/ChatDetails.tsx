@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode } from '@/lib/automation-types';
-import { DEFAULT_APPROVAL_CUSTOM_MESSAGE } from '@/lib/automation-types';
+import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
@@ -76,6 +76,10 @@ export default function ChatDetails({
   const [approvalThreadIdInput, setApprovalThreadIdInput] = useState<number | ''>('');
   const [approvalMessageModeInput, setApprovalMessageModeInput] = useState<ApprovalMessageMode>('forward');
   const [approvalCustomMessageInput, setApprovalCustomMessageInput] = useState(DEFAULT_APPROVAL_CUSTOM_MESSAGE);
+  const [approvalAgreeButtonLabelInput, setApprovalAgreeButtonLabelInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel);
+  const [approvalDisagreeButtonLabelInput, setApprovalDisagreeButtonLabelInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
+  const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
+  const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
@@ -147,6 +151,10 @@ export default function ChatDetails({
       setApprovalThreadIdInput(automation.approvalThreadId !== null && automation.approvalThreadId !== undefined ? automation.approvalThreadId : '');
       setApprovalMessageModeInput(automation.approvalMessageMode || 'forward');
       setApprovalCustomMessageInput(automation.approvalCustomMessage || DEFAULT_APPROVAL_CUSTOM_MESSAGE);
+      setApprovalAgreeButtonLabelInput(automation.approvalActionConfig?.agreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel);
+      setApprovalDisagreeButtonLabelInput(automation.approvalActionConfig?.disagreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
+      setApprovalAgreeResultMessageInput(automation.approvalActionConfig?.agreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
+      setApprovalDisagreeResultMessageInput(automation.approvalActionConfig?.disagreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
@@ -330,6 +338,12 @@ export default function ChatDetails({
         updates.approvalThreadId = approvalThreadIdInput === '' ? null : Number(approvalThreadIdInput);
         updates.approvalMessageMode = approvalMessageModeInput;
         updates.approvalCustomMessage = approvalCustomMessageInput;
+        updates.approvalActionConfig = {
+          agreeButtonLabel: approvalAgreeButtonLabelInput,
+          disagreeButtonLabel: approvalDisagreeButtonLabelInput,
+          agreeResultMessage: approvalAgreeResultMessageInput,
+          disagreeResultMessage: approvalDisagreeResultMessageInput,
+        };
       }
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
@@ -1363,6 +1377,68 @@ export default function ChatDetails({
                           Message này sẽ được gửi trước tin nhắn gốc để người duyệt đọc nhanh. Có thể dùng nội dung mặc định hoặc tự sửa theo ý bạn.
                         </div>
                       </div>
+
+                      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
+                          Mẫu nút và nội dung phản hồi
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút đồng ý:</label>
+                            <input
+                              id="tour-approval-agree-label"
+                              value={approvalAgreeButtonLabelInput}
+                              onChange={(e) => setApprovalAgreeButtonLabelInput(e.target.value)}
+                              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                            />
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút không đồng ý:</label>
+                            <input
+                              id="tour-approval-disagree-label"
+                              value={approvalDisagreeButtonLabelInput}
+                              onChange={(e) => setApprovalDisagreeButtonLabelInput(e.target.value)}
+                              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                            />
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nội dung sau khi đồng ý:</label>
+                          <textarea
+                            id="tour-approval-agree-result"
+                            value={approvalAgreeResultMessageInput}
+                            onChange={(e) => setApprovalAgreeResultMessageInput(e.target.value)}
+                            rows={2}
+                            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.4 }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nội dung sau khi không đồng ý:</label>
+                          <textarea
+                            id="tour-approval-disagree-result"
+                            value={approvalDisagreeResultMessageInput}
+                            onChange={(e) => setApprovalDisagreeResultMessageInput(e.target.value)}
+                            rows={2}
+                            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.4 }}
+                          />
+                        </div>
+                        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '8px', fontSize: '11px', color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>Xem trước:</div>
+                          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                            {approvalCustomMessageInput || DEFAULT_APPROVAL_CUSTOM_MESSAGE}
+                            {'\n\n'}
+                            {approvalAgreeResultMessageInput || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage}
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(34, 158, 217, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(34, 158, 217, 0.2)', color: 'var(--color-text)', fontWeight: 600 }}>
+                              {approvalAgreeButtonLabelInput || DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel}
+                            </span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(239, 68, 68, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--color-text)', fontWeight: 600 }}>
+                              {approvalDisagreeButtonLabelInput || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>,
                     { selectorId: 'approval' }
                   )}
@@ -1383,6 +1459,14 @@ export default function ChatDetails({
                       {automation.approvalCustomMessage}
                     </div>
                   )}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(34, 158, 217, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(34, 158, 217, 0.2)', color: 'var(--color-text)', fontWeight: 600, fontSize: '10px' }}>
+                      {automation.approvalActionConfig?.agreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel}
+                    </span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(239, 68, 68, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--color-text)', fontWeight: 600, fontSize: '10px' }}>
+                      {automation.approvalActionConfig?.disagreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

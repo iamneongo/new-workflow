@@ -3,6 +3,13 @@ export type SupplierRouteMode = 'forward' | 'copy';
 export type FinalMessageMode = 'forward' | 'copy';
 export type SupplyChangeMessageMode = 'forward' | 'copy';
 
+export interface ApprovalActionConfig {
+  agreeButtonLabel: string;
+  disagreeButtonLabel: string;
+  agreeResultMessage: string;
+  disagreeResultMessage: string;
+}
+
 export interface SupplierRoute {
   id: string;
   name: string;
@@ -13,6 +20,13 @@ export interface SupplierRoute {
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+
+export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
+  agreeButtonLabel: '👍 Đồng ý',
+  disagreeButtonLabel: '👎 Không đồng ý',
+  agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
+  disagreeResultMessage: '❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi {{userFullName}}',
+};
 
 export interface TopicEntry {
   threadId: number;
@@ -44,6 +58,7 @@ export interface AutomationSetup {
   approvalThreadId: number | null;
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
+  approvalActionConfig: ApprovalActionConfig;
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;

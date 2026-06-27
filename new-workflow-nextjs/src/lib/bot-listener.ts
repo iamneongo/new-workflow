@@ -11,8 +11,8 @@
 
 import FormData from 'form-data';
 import { getTelegramClient, sendSseUpdate } from './telegram';
-import { 
-  loadAutomationSetup, 
+import {
+  loadAutomationSetup,
   saveAutomationSetup,
   getActiveAutomationSetups,
   loadGlobalBotToken,
@@ -24,6 +24,7 @@ import {
   FinalMessageMode,
   SupplierRoute,
   DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+  DEFAULT_APPROVAL_ACTION_CONFIG,
 } from './database';
 
 // ---------------------------------------------------------------------------
@@ -369,6 +370,7 @@ async function handleBotUpdate(update: any) {
           }
 
           await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
+          const approvalActionConfig = resolveApprovalActionConfig(autoSetup);
 
           await fetch(`${baseUrl}/editMessageText`, {
             method: 'POST',
@@ -376,7 +378,7 @@ async function handleBotUpdate(update: any) {
             body: JSON.stringify({
               chat_id: cq.message.chat.id,
               message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi ${userFullName}`,
+              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '')}`,
             }),
           });
 
@@ -436,6 +438,7 @@ async function handleBotUpdate(update: any) {
           }
 
           await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
+          const approvalActionConfig = resolveApprovalActionConfig(autoSetup);
 
           await fetch(`${baseUrl}/editMessageText`, {
             method: 'POST',
@@ -443,7 +446,7 @@ async function handleBotUpdate(update: any) {
             body: JSON.stringify({
               chat_id: cq.message.chat.id,
               message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n❌ *BỊ TỪ CHỐI PHÊ DUYỆT* bởi ${userFullName}`,
+              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '')}`,
             }),
           });
 
@@ -1042,6 +1045,7 @@ async function handleBotMessageTrigger(
       senderName,
       originalText
     );
+    const approvalActionConfig = resolveApprovalActionConfig(listener);
 
     console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
     emitListenerLog('info', `Đang gửi prompt phê duyệt vào nhóm ${listener.approvalGroupId}...`, {
@@ -1055,8 +1059,8 @@ async function handleBotMessageTrigger(
       reply_markup: {
         inline_keyboard: [
           [
-            { text: '👍 Đồng ý', callback_data: `appr_agree:${logId}` },
-            { text: '👎 Không đồng ý', callback_data: `appr_disagree:${logId}` }
+            { text: approvalActionConfig.agreeButtonLabel, callback_data: `appr_agree:${logId}` },
+            { text: approvalActionConfig.disagreeButtonLabel, callback_data: `appr_disagree:${logId}` }
           ]
         ]
       }
@@ -1283,6 +1287,38 @@ function formatApprovalCustomMessage(
   return base
     .replaceAll('{{senderName}}', senderName)
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
+function formatApprovalDecisionMessage(
+  template: string,
+  userFullName: string,
+  originalText: string
+): string {
+  const base = (template || '').trim();
+  if (!base) {
+    return '';
+  }
+  return base
+    .replaceAll('{{userFullName}}', userFullName)
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
+function resolveApprovalActionConfig(autoSetup: any) {
+  const cfg = autoSetup?.approvalActionConfig || {};
+  return {
+    agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
+      ? cfg.agreeButtonLabel.trim()
+      : DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel,
+    disagreeButtonLabel: typeof cfg.disagreeButtonLabel === 'string' && cfg.disagreeButtonLabel.trim()
+      ? cfg.disagreeButtonLabel.trim()
+      : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel,
+    agreeResultMessage: typeof cfg.agreeResultMessage === 'string' && cfg.agreeResultMessage.trim()
+      ? cfg.agreeResultMessage.trim()
+      : DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage,
+    disagreeResultMessage: typeof cfg.disagreeResultMessage === 'string' && cfg.disagreeResultMessage.trim()
+      ? cfg.disagreeResultMessage.trim()
+      : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage,
+  };
 }
 
 function normalizeComparableChatId(chatId: string | number | null | undefined): string {
