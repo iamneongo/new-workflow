@@ -957,7 +957,7 @@ export default function ChatDetails({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nhà cung ứng cho CT:</label>
-          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Tin nhắn bắt đầu bằng <code>CT:</code> sẽ hỏi chọn nhà cung ứng trước khi gửi.</span>
+          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Tin CT hợp lệ cần bắt đầu bằng <code>CT:</code>, có dòng <code>HM:</code> và ít nhất 1 dòng vật tư đánh số.</span>
         </div>
         <button
           id="tour-add-supplier-route"

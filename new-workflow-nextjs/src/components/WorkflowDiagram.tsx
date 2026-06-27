@@ -76,7 +76,7 @@ export default function WorkflowDiagram() {
             <span className="node-tag">Bước 2: Phê duyệt sơ bộ</span>
             <h5 className="node-title">Bot forward &amp; Hỏi ý kiến</h5>
             <p className="node-text">
-              Bot gửi tin nhắn tới nhóm đích kèm 2 nút tương tác. Với tin CT:, sau khi duyệt sẽ bật nhánh chọn nhà cung ứng:
+              Bot gửi tin nhắn tới nhóm đích kèm 2 nút tương tác. Với tin CT hợp lệ, sau khi duyệt sẽ bật nhánh chọn nhà cung ứng:
             </p>
             <div className="node-options-inline">
               <span className="opt-badge opt-agree"><i className="fa-solid fa-check" /> Đồng ý</span>
@@ -131,7 +131,7 @@ export default function WorkflowDiagram() {
                 <div className="node-content">
                   <span className="node-tag">Bước 3: Lựa chọn vật tư</span>
                   <h5 className="node-title">Hỏi phương án cung cấp</h5>
-                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi. Tin CT: sẽ hiển thị danh sách nhà cung ứng để chọn trước khi gửi tiếp:</p>
+                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi. Tin CT hợp lệ sẽ hiển thị danh sách nhà cung ứng để chọn trước khi gửi tiếp:</p>
                   <div className="node-options-list">
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Đồng ý cung cấp vật tư</div>
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Không đồng ý cung cấp vật tư</div>

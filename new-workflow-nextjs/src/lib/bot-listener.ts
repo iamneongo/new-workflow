@@ -1258,16 +1258,46 @@ function formatApprovalCustomMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
 }
 
+type SupplierRoutingMatch = {
+  isMatch: boolean;
+  reason: string;
+};
+
+function parseSupplierRoutingMessage(text: string): SupplierRoutingMatch {
+  const normalized = (text || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return { isMatch: false, reason: 'Thiếu nội dung tin nhắn' };
+  }
+
+  const lines = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const firstLine = lines[0] || '';
+  if (!/^CT\s*:/i.test(firstLine)) {
+    return { isMatch: false, reason: 'Thiếu: CT ở đầu tin nhắn' };
+  }
+
+  const hasHmLine = lines.slice(1).some((line) => /^HM\s*:/i.test(line));
+  if (!hasHmLine) {
+    return { isMatch: false, reason: 'Thiếu dòng HM' };
+  }
+
+  const numberedItemCount = lines.slice(1).filter((line) => /^\d+\s*[.)]/.test(line)).length;
+  if (numberedItemCount === 0) {
+    return { isMatch: false, reason: 'Thiếu danh sách vật tư đánh số' };
+  }
+
+  return { isMatch: true, reason: 'Đủ điều kiện CT' };
+}
+
 function isSupplierRoutingMessage(text: string): boolean {
-  const normalized = (text || '').trim();
-  return /^CT\s*:/i.test(normalized);
+  return parseSupplierRoutingMessage(text).isMatch;
 }
 
 function explainSupplierRoutingMatch(text: string): string {
-  const normalized = (text || '').trim();
-  return /^CT\s*:/i.test(normalized)
-    ? 'Đủ điều kiện CT'
-    : 'Thiếu: CT ở đầu tin nhắn';
+  return parseSupplierRoutingMessage(text).reason;
 }
 
 function normalizeComparableChatId(chatId: string | number | null | undefined): string {
