@@ -23,6 +23,8 @@ import {
   ApprovalMessageMode,
   FinalMessageMode,
   SupplierRoute,
+  ApprovalActionConfig,
+  ApprovalTopicConfig,
   DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   DEFAULT_APPROVAL_ACTION_CONFIG,
 } from './database';
@@ -41,6 +43,8 @@ export interface ActiveListener {
   approvalThreadId: number | null;
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
+  approvalActionConfig: ApprovalActionConfig;
+  approvalTopicConfigs: ApprovalTopicConfig[];
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;
@@ -189,6 +193,8 @@ export async function autoStartFromConfig(): Promise<void> {
           approvalThreadId: setup.approvalThreadId,
           approvalMessageMode: setup.approvalMessageMode,
           approvalCustomMessage: setup.approvalCustomMessage,
+          approvalActionConfig: setup.approvalActionConfig,
+          approvalTopicConfigs: setup.approvalTopicConfigs,
           supplyGroupId: setup.supplyGroupId,
           supplyThreadId: setup.supplyThreadId,
           supplyListenGroupId: setup.supplyListenGroupId,
@@ -1156,6 +1162,8 @@ export async function startListenerForAutomation(automationId: string): Promise<
     approvalThreadId: setup.approvalThreadId,
     approvalMessageMode: setup.approvalMessageMode,
     approvalCustomMessage: setup.approvalCustomMessage,
+    approvalActionConfig: setup.approvalActionConfig,
+    approvalTopicConfigs: setup.approvalTopicConfigs,
     supplyGroupId: setup.supplyGroupId,
     supplyThreadId: setup.supplyThreadId,
     supplyListenGroupId: setup.supplyListenGroupId,
