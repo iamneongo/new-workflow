@@ -616,18 +616,13 @@ async function handleBotUpdate(update: any) {
         }
 
         const expectedSupplyListenTarget = resolveSupplyListenTarget(autoSetup, log);
-        const expectedSupplyGroupId = expectedSupplyListenTarget.groupId;
-        if (expectedSupplyGroupId) {
-          const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
-          const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
-          if (normExpected !== normActual) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply agree mismatch');
-            return;
-          }
+        if (expectedSupplyListenTarget.groupIds.length > 0 && !matchesSupplyListenGroup(cq.message.chat.id, autoSetup, log)) {
+          await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.groupIds.join(', ')}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply agree mismatch');
+          return;
         }
         if (expectedSupplyListenTarget.threadIds.length > 0) {
           const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (actualThreadId === null || !expectedSupplyListenTarget.threadIds.includes(actualThreadId)) {
+          if (!matchesSupplyListenThread(actualThreadId, autoSetup, log)) {
             await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply agree topic mismatch');
             return;
           }
@@ -680,18 +675,13 @@ async function handleBotUpdate(update: any) {
         }
 
         const expectedSupplyListenTarget = resolveSupplyListenTarget(autoSetup, log);
-        const expectedSupplyGroupId = expectedSupplyListenTarget.groupId;
-        if (expectedSupplyGroupId) {
-          const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
-          const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
-          if (normExpected !== normActual) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply decision mismatch');
-            return;
-          }
+        if (expectedSupplyListenTarget.groupIds.length > 0 && !matchesSupplyListenGroup(cq.message.chat.id, autoSetup, log)) {
+          await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.groupIds.join(', ')}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply decision mismatch');
+          return;
         }
         if (expectedSupplyListenTarget.threadIds.length > 0) {
           const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (actualThreadId === null || !expectedSupplyListenTarget.threadIds.includes(actualThreadId)) {
+          if (!matchesSupplyListenThread(actualThreadId, autoSetup, log)) {
             await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply decision topic mismatch');
             return;
           }
@@ -849,7 +839,13 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          const sourceGroupId = autoSetup.supplyListenGroupId || autoSetup.supplyChangeGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId;
+          const sourceGroupIds = Array.from(new Set([
+            autoSetup.supplyListenGroupId,
+            autoSetup.supplyChangeGroupId,
+            log.selected_supplier_group_id,
+            autoSetup.supplyGroupId,
+          ].map((item) => normalizeComparableChatId(item)).filter(Boolean)));
+          const sourceGroupId = sourceGroupIds[0] || '';
           if (!sourceGroupId) {
             emitListenerLog('warn', `Không có group nguồn để relay reply thay đổi cho automation ${log.automation_id}.`, {
               automationId: log.automation_id,
@@ -858,21 +854,16 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          const expectedThreadIds = Array.isArray(autoSetup.supplyListenThreadIds) && autoSetup.supplyListenThreadIds.length > 0
-            ? normalizeThreadIds(autoSetup.supplyListenThreadIds)
-            : autoSetup.supplyListenThreadId !== null && autoSetup.supplyListenThreadId !== undefined
-              ? normalizeThreadIds([autoSetup.supplyListenThreadId])
-              : autoSetup.supplyChangeThreadId !== null && autoSetup.supplyChangeThreadId !== undefined
-                ? normalizeThreadIds([autoSetup.supplyChangeThreadId])
-                : log.selected_supplier_thread_id !== null && log.selected_supplier_thread_id !== undefined
-                  ? normalizeThreadIds([log.selected_supplier_thread_id])
-                  : autoSetup.supplyThreadId !== null && autoSetup.supplyThreadId !== undefined
-                    ? normalizeThreadIds([autoSetup.supplyThreadId])
-                    : [];
-          const normSourceGroup = normalizeComparableChatId(sourceGroupId);
+          const expectedThreadIds = Array.from(new Set([
+            ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
+            autoSetup.supplyListenThreadId,
+            autoSetup.supplyChangeThreadId,
+            log.selected_supplier_thread_id,
+            autoSetup.supplyThreadId,
+          ].map((item) => normalizeThreadId(item)).filter((item): item is number => item !== null)));
           const normChatId = normalizeComparableChatId(chatId);
-          if (normSourceGroup !== normChatId) {
-            emitListenerLog('warn', `Bỏ qua reply change do chat không khớp. Reply chat=${chatId}, config=${sourceGroupId}.`, {
+          if (!sourceGroupIds.includes(normChatId)) {
+            emitListenerLog('warn', `Bỏ qua reply change do chat không khớp. Reply chat=${chatId}, config=${sourceGroupIds.join(', ')}.`, {
               automationId: log.automation_id,
               step: 'supply-change-reply',
             });
@@ -1350,21 +1341,44 @@ function normalizeComparableChatId(chatId: string | number | null | undefined): 
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
 }
 
-function resolveSupplyListenTarget(autoSetup: any, log: any): { groupId: string; threadIds: number[]; threadId: number | null } {
-  const threadIds = Array.isArray(autoSetup.supplyListenThreadIds) && autoSetup.supplyListenThreadIds.length > 0
-    ? normalizeThreadIds(autoSetup.supplyListenThreadIds)
-    : autoSetup.supplyListenThreadId !== null && autoSetup.supplyListenThreadId !== undefined
-      ? normalizeThreadIds([autoSetup.supplyListenThreadId])
-      : log.selected_supplier_thread_id !== null && log.selected_supplier_thread_id !== undefined
-        ? normalizeThreadIds([log.selected_supplier_thread_id])
-        : autoSetup.supplyThreadId !== null && autoSetup.supplyThreadId !== undefined
-          ? normalizeThreadIds([autoSetup.supplyThreadId])
-          : [];
+function resolveSupplyListenTarget(autoSetup: any, log: any): {
+  groupIds: string[];
+  threadIds: number[];
+  groupId: string;
+  threadId: number | null;
+} {
+  const groupIds = Array.from(new Set([
+    autoSetup.supplyListenGroupId,
+    log.selected_supplier_group_id,
+    autoSetup.supplyGroupId,
+  ].map((item) => normalizeComparableChatId(item)).filter(Boolean)));
+
+  const threadIds = Array.from(new Set([
+    ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
+    autoSetup.supplyListenThreadId,
+    log.selected_supplier_thread_id,
+    autoSetup.supplyThreadId,
+  ].map((item) => normalizeThreadId(item)).filter((item): item is number => item !== null)));
+
   return {
-    groupId: autoSetup.supplyListenGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId || '',
+    groupIds,
+    groupId: groupIds[0] ?? '',
     threadIds,
     threadId: threadIds[0] ?? null,
   };
+}
+
+function matchesSupplyListenGroup(actualChatId: string | number | null | undefined, autoSetup: any, log: any): boolean {
+  const actual = normalizeComparableChatId(actualChatId);
+  if (!actual) return false;
+  const target = resolveSupplyListenTarget(autoSetup, log);
+  return target.groupIds.includes(actual);
+}
+
+function matchesSupplyListenThread(actualThreadId: number | null, autoSetup: any, log: any): boolean {
+  const target = resolveSupplyListenTarget(autoSetup, log);
+  if (target.threadIds.length === 0) return true;
+  return actualThreadId !== null && target.threadIds.includes(actualThreadId);
 }
 
 function resolveApprovalRejectTarget(autoSetup: any): { groupId: string; threadId: number | null; usedFallback: boolean } {
