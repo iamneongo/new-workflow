@@ -10,6 +10,13 @@ export interface ApprovalActionConfig {
   disagreeResultMessage: string;
 }
 
+export interface ApprovalTopicConfig {
+  sourceThreadId: number;
+  approvalMessageMode: ApprovalMessageMode;
+  approvalCustomMessage: string;
+  approvalActionConfig: ApprovalActionConfig;
+}
+
 export interface SupplierRoute {
   id: string;
   name: string;
@@ -59,6 +66,7 @@ export interface AutomationSetup {
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
   approvalActionConfig: ApprovalActionConfig;
+  approvalTopicConfigs: ApprovalTopicConfig[];
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;

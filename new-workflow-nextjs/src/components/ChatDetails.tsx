@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode } from '@/lib/automation-types';
+import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig } from '@/lib/automation-types';
 import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
@@ -80,6 +80,7 @@ export default function ChatDetails({
   const [approvalDisagreeButtonLabelInput, setApprovalDisagreeButtonLabelInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
   const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
   const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
+  const [approvalTopicConfigsInput, setApprovalTopicConfigsInput] = useState<ApprovalTopicConfig[]>([]);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
@@ -155,6 +156,17 @@ export default function ChatDetails({
       setApprovalDisagreeButtonLabelInput(automation.approvalActionConfig?.disagreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
       setApprovalAgreeResultMessageInput(automation.approvalActionConfig?.agreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
       setApprovalDisagreeResultMessageInput(automation.approvalActionConfig?.disagreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
+      const sourceThreadIds = Array.isArray(automation.sourceThreadIds) && automation.sourceThreadIds.length > 0
+        ? automation.sourceThreadIds
+        : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
+          ? [automation.sourceThreadId]
+          : [];
+      setApprovalTopicConfigsInput(
+        syncApprovalTopicConfigs(
+          sourceThreadIds,
+          Array.isArray(automation.approvalTopicConfigs) ? automation.approvalTopicConfigs : []
+        )
+      );
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
@@ -192,6 +204,10 @@ export default function ChatDetails({
     setPanX(0);
     setPanY(0);
   }, [automation?.id]);
+
+  useEffect(() => {
+    setApprovalTopicConfigsInput((current) => syncApprovalTopicConfigs(sourceThreadIdsInput, current));
+  }, [sourceThreadIdsInput]);
 
   useEffect(() => {
     if (!onActiveNodeChange) return;
@@ -344,6 +360,7 @@ export default function ChatDetails({
           agreeResultMessage: approvalAgreeResultMessageInput,
           disagreeResultMessage: approvalDisagreeResultMessageInput,
         };
+        updates.approvalTopicConfigs = approvalTopicConfigsInput;
       }
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
@@ -600,6 +617,23 @@ export default function ChatDetails({
     threadId: null,
     messageMode: 'forward',
   });
+
+  const createDefaultApprovalTopicConfig = (sourceThreadId: number): ApprovalTopicConfig => ({
+    sourceThreadId,
+    approvalMessageMode: approvalMessageModeInput,
+    approvalCustomMessage: approvalCustomMessageInput,
+    approvalActionConfig: {
+      agreeButtonLabel: approvalAgreeButtonLabelInput,
+      disagreeButtonLabel: approvalDisagreeButtonLabelInput,
+      agreeResultMessage: approvalAgreeResultMessageInput,
+      disagreeResultMessage: approvalDisagreeResultMessageInput,
+    },
+  });
+
+  const syncApprovalTopicConfigs = (sourceThreadIds: number[], existing: ApprovalTopicConfig[]) => {
+    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
+    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultApprovalTopicConfig(threadId));
+  };
 
   const renderGroupTopicSelector = (
     groupIdVal: string,
@@ -1439,6 +1473,142 @@ export default function ChatDetails({
                           </div>
                         </div>
                       </div>
+
+                      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
+                            Cấu hình riêng theo từng topic nguồn
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                            Mỗi topic nguồn có thể có lời nhắn, nút và nội dung sau khi duyệt riêng. Nếu topic chưa có cấu hình riêng thì bot sẽ dùng cấu hình mặc định ở trên.
+                          </div>
+                        </div>
+
+                        {sourceThreadIdsInput.length > 0 ? (
+                          sourceThreadIdsInput.map((threadId) => {
+                            const topicEntry = automation?.sourceGroupId && chats[automation.sourceGroupId]?.topics
+                              ? Object.values(chats[automation.sourceGroupId].topics).find((topic) => topic.threadId === threadId)
+                              : null;
+                            const configIndex = approvalTopicConfigsInput.findIndex((item) => item.sourceThreadId === threadId);
+                            const config = configIndex >= 0
+                              ? approvalTopicConfigsInput[configIndex]
+                              : createDefaultApprovalTopicConfig(threadId);
+                            const setTopicConfig = (next: ApprovalTopicConfig) => {
+                              setApprovalTopicConfigsInput((current) => {
+                                const exists = current.findIndex((item) => item.sourceThreadId === threadId);
+                                if (exists >= 0) {
+                                  const cloned = [...current];
+                                  cloned[exists] = next;
+                                  return cloned;
+                                }
+                                return [...current, next];
+                              });
+                            };
+
+                            return (
+                              <div key={threadId} style={{ border: '1px solid var(--border-color)', borderRadius: '6px', padding: '8px', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Topic nguồn:</span>
+                                    {topicEntry ? (
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                        <span>{topicEntry.topicIcon || '💬'}</span>
+                                        <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>{topicEntry.topicName}</span>
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>Chủ đề #{threadId}</span>
+                                    )}
+                                  </div>
+                                  {configIndex >= 0 && (
+                                    <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>Đã có cấu hình riêng</span>
+                                  )}
+                                </div>
+
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Lời nhắn riêng:</label>
+                                  <textarea
+                                    rows={3}
+                                    value={config.approvalCustomMessage}
+                                    onChange={(e) => setTopicConfig({
+                                      ...config,
+                                      approvalCustomMessage: e.target.value,
+                                    })}
+                                    style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.4 }}
+                                  />
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút đồng ý:</label>
+                                    <input
+                                      value={config.approvalActionConfig.agreeButtonLabel}
+                                      onChange={(e) => setTopicConfig({
+                                        ...config,
+                                        approvalActionConfig: {
+                                          ...config.approvalActionConfig,
+                                          agreeButtonLabel: e.target.value,
+                                        },
+                                      })}
+                                      style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                                    />
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút không đồng ý:</label>
+                                    <input
+                                      value={config.approvalActionConfig.disagreeButtonLabel}
+                                      onChange={(e) => setTopicConfig({
+                                        ...config,
+                                        approvalActionConfig: {
+                                          ...config.approvalActionConfig,
+                                          disagreeButtonLabel: e.target.value,
+                                        },
+                                      })}
+                                      style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Sau khi đồng ý:</label>
+                                    <textarea
+                                      rows={2}
+                                      value={config.approvalActionConfig.agreeResultMessage}
+                                      onChange={(e) => setTopicConfig({
+                                        ...config,
+                                        approvalActionConfig: {
+                                          ...config.approvalActionConfig,
+                                          agreeResultMessage: e.target.value,
+                                        },
+                                      })}
+                                      style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.4 }}
+                                    />
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Sau khi không đồng ý:</label>
+                                    <textarea
+                                      rows={2}
+                                      value={config.approvalActionConfig.disagreeResultMessage}
+                                      onChange={(e) => setTopicConfig({
+                                        ...config,
+                                        approvalActionConfig: {
+                                          ...config.approvalActionConfig,
+                                          disagreeResultMessage: e.target.value,
+                                        },
+                                      })}
+                                      style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.4 }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div style={{ padding: '10px', fontSize: '11px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)' }}>
+                            Chọn ít nhất 1 topic nguồn ở Bước 1 để bật cấu hình riêng cho từng topic.
+                          </div>
+                        )}
+                      </div>
                     </div>,
                     { selectorId: 'approval' }
                   )}
@@ -1457,6 +1627,29 @@ export default function ChatDetails({
                   {automation.approvalCustomMessage && (
                     <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', fontSize: '10px', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>
                       {automation.approvalCustomMessage}
+                    </div>
+                  )}
+                  {Array.isArray(automation.approvalTopicConfigs) && automation.approvalTopicConfigs.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                        Cấu hình riêng theo topic: {automation.approvalTopicConfigs.length} topic
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                        {automation.approvalTopicConfigs.map((cfg) => {
+                          const topicEntry = automation.sourceGroupId && chats[automation.sourceGroupId]?.topics
+                            ? Object.values(chats[automation.sourceGroupId].topics).find((topic) => topic.threadId === cfg.sourceThreadId)
+                            : null;
+                          return (
+                            <span
+                              key={cfg.sourceThreadId}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(59, 130, 246, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(59, 130, 246, 0.2)', color: 'var(--color-text)', fontWeight: 600, fontSize: '10px' }}
+                            >
+                              <span>{topicEntry?.topicIcon || '💬'}</span>
+                              <span>{topicEntry?.topicName || `Topic #${cfg.sourceThreadId}`}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>

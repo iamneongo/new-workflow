@@ -370,7 +370,7 @@ async function handleBotUpdate(update: any) {
           }
 
           await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
-          const approvalActionConfig = resolveApprovalActionConfig(autoSetup);
+          const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
 
           await fetch(`${baseUrl}/editMessageText`, {
             method: 'POST',
@@ -378,7 +378,7 @@ async function handleBotUpdate(update: any) {
             body: JSON.stringify({
               chat_id: cq.message.chat.id,
               message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '')}`,
+              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '')}`,
             }),
           });
 
@@ -438,7 +438,7 @@ async function handleBotUpdate(update: any) {
           }
 
           await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
-          const approvalActionConfig = resolveApprovalActionConfig(autoSetup);
+          const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
 
           await fetch(`${baseUrl}/editMessageText`, {
             method: 'POST',
@@ -446,7 +446,7 @@ async function handleBotUpdate(update: any) {
             body: JSON.stringify({
               chat_id: cq.message.chat.id,
               message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '')}`,
+              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '')}`,
             }),
           });
 
@@ -1040,12 +1040,7 @@ async function handleBotMessageTrigger(
       continue;
     }
 
-    const approvalText = formatApprovalCustomMessage(
-      listener.approvalCustomMessage,
-      senderName,
-      originalText
-    );
-    const approvalActionConfig = resolveApprovalActionConfig(listener);
+    const approvalTopicConfig = resolveApprovalTopicConfig(listener, threadId);
 
     console.log(`[BotListener] Trigger stage: sending approval prompt for log ${logId}`);
     emitListenerLog('info', `Đang gửi prompt phê duyệt vào nhóm ${listener.approvalGroupId}...`, {
@@ -1055,12 +1050,16 @@ async function handleBotMessageTrigger(
     const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
       chat_id: listener.approvalGroupId,
       message_thread_id: listener.approvalThreadId || undefined,
-      text: approvalText,
+      text: formatApprovalCustomMessage(
+        approvalTopicConfig.approvalCustomMessage,
+        senderName,
+        originalText
+      ),
       reply_markup: {
         inline_keyboard: [
           [
-            { text: approvalActionConfig.agreeButtonLabel, callback_data: `appr_agree:${logId}` },
-            { text: approvalActionConfig.disagreeButtonLabel, callback_data: `appr_disagree:${logId}` }
+            { text: approvalTopicConfig.approvalActionConfig.agreeButtonLabel, callback_data: `appr_agree:${logId}` },
+            { text: approvalTopicConfig.approvalActionConfig.disagreeButtonLabel, callback_data: `appr_disagree:${logId}` }
           ]
         ]
       }
@@ -1076,11 +1075,11 @@ async function handleBotMessageTrigger(
       await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
     }
 
-    const contentMethod = listener.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-    const contentLabel = listener.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
+    const contentMethod = approvalTopicConfig.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+    const contentLabel = approvalTopicConfig.approvalMessageMode === 'copy' ? 'approval copy' : 'approval forward';
     emitListenerLog(
       'info',
-      listener.approvalMessageMode === 'copy'
+      approvalTopicConfig.approvalMessageMode === 'copy'
         ? 'Đang copy full nội dung gốc sang nhóm phê duyệt...'
         : 'Đang forward nội dung gốc sang nhóm phê duyệt...',
       { automationId: listener.automationId, step: 'content' }
@@ -1094,8 +1093,8 @@ async function handleBotMessageTrigger(
     emitListenerLog(
       contentData.ok ? 'info' : 'error',
       contentData.ok
-        ? `Đã ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc thành công.`
-        : `Không thể ${listener.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
+        ? `Đã ${approvalTopicConfig.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc thành công.`
+        : `Không thể ${approvalTopicConfig.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
       { automationId: listener.automationId, step: 'content' }
     );
 
@@ -1317,7 +1316,38 @@ function resolveApprovalActionConfig(autoSetup: any) {
       : DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage,
     disagreeResultMessage: typeof cfg.disagreeResultMessage === 'string' && cfg.disagreeResultMessage.trim()
       ? cfg.disagreeResultMessage.trim()
-      : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage,
+    : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage,
+  };
+}
+
+function resolveApprovalTopicConfig(autoSetup: any, sourceThreadId: number | null): {
+  approvalMessageMode: ApprovalMessageMode;
+  approvalCustomMessage: string;
+  approvalActionConfig: ReturnType<typeof resolveApprovalActionConfig>;
+} {
+  const base = {
+    approvalMessageMode: (autoSetup?.approvalMessageMode === 'copy' ? 'copy' : 'forward') as ApprovalMessageMode,
+    approvalCustomMessage: typeof autoSetup?.approvalCustomMessage === 'string' && autoSetup.approvalCustomMessage.trim()
+      ? autoSetup.approvalCustomMessage.trim()
+      : DEFAULT_APPROVAL_CUSTOM_MESSAGE,
+    approvalActionConfig: resolveApprovalActionConfig(autoSetup),
+  };
+
+  if (sourceThreadId === null || !Array.isArray(autoSetup?.approvalTopicConfigs)) {
+    return base;
+  }
+
+  const matched = autoSetup.approvalTopicConfigs.find((item: any) => normalizeThreadId(item?.sourceThreadId) === sourceThreadId);
+  if (!matched) return base;
+
+  return {
+    approvalMessageMode: matched.approvalMessageMode === 'copy' ? 'copy' : base.approvalMessageMode,
+    approvalCustomMessage: typeof matched.approvalCustomMessage === 'string' && matched.approvalCustomMessage.trim()
+      ? matched.approvalCustomMessage.trim()
+      : base.approvalCustomMessage,
+    approvalActionConfig: matched.approvalActionConfig
+      ? resolveApprovalActionConfig({ approvalActionConfig: matched.approvalActionConfig })
+      : base.approvalActionConfig,
   };
 }
 
