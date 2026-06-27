@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { loadAutomationSetup, loadAutomationSetups, saveAutomationSetup, AutomationSetup, saveGlobalBotToken, normalizeThreadId, normalizeThreadIds } from '@/lib/database';
+import { loadAutomationSetup, loadAutomationSetups, saveAutomationSetup, AutomationSetup, saveGlobalBotToken, normalizeThreadId } from '@/lib/database';
 import { startListenerForAutomation, stopListenerForAutomation } from '@/lib/bot-listener';
 
 export const dynamic = 'force-dynamic';
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const {
       id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
       approvalGroupId, approvalThreadId, approvalMessageMode, approvalCustomMessage,
-      supplyGroupId, supplyThreadId, supplyThreadIds, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
+      supplyGroupId, supplyThreadId, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
       deliveryGroupId, deliveryThreadId,
       finalMessageMode,
       finalGroupId, finalThreadId,
@@ -76,11 +76,7 @@ export async function POST(req: NextRequest) {
     if (approvalMessageMode !== undefined) updates.approvalMessageMode = approvalMessageMode;
     if (approvalCustomMessage !== undefined) updates.approvalCustomMessage = approvalCustomMessage;
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;
-    if (supplyThreadIds !== undefined) {
-      updates.supplyThreadIds = normalizeThreadIds(supplyThreadIds);
-    } else if (supplyThreadId !== undefined) {
-      updates.supplyThreadId = normalizeThreadId(supplyThreadId);
-    }
+    if (supplyThreadId !== undefined) updates.supplyThreadId = normalizeThreadId(supplyThreadId);
     if (supplyChangeGroupId !== undefined) updates.supplyChangeGroupId = supplyChangeGroupId;
     if (supplyChangeThreadId !== undefined) updates.supplyChangeThreadId = normalizeThreadId(supplyChangeThreadId);
     if (supplyChangeMessageMode !== undefined) updates.supplyChangeMessageMode = supplyChangeMessageMode;

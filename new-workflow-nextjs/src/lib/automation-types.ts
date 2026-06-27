@@ -45,7 +45,6 @@ export interface AutomationSetup {
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
   supplyGroupId: string;
-  supplyThreadIds: number[];
   supplyThreadId: number | null;
   supplyChangeGroupId: string;
   supplyChangeThreadId: number | null;
