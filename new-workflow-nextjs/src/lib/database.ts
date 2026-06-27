@@ -415,6 +415,8 @@ export async function ensureDatabase(): Promise<void> {
         supplier_route_id VARCHAR(100),
         selected_supplier_group_id VARCHAR(100),
         selected_supplier_thread_id INTEGER,
+        supply_prompt_group_id VARCHAR(100),
+        supply_prompt_thread_id INTEGER,
         delivery_msg_id INTEGER,
         status VARCHAR(50) DEFAULT 'pending'
       );
@@ -426,6 +428,8 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supplier_route_id VARCHAR(100)',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS selected_supplier_group_id VARCHAR(100)',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS selected_supplier_thread_id INTEGER',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supply_prompt_group_id VARCHAR(100)',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supply_prompt_thread_id INTEGER',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS delivery_group_id VARCHAR(100)',
     ];
     for (const q of workflowLogAlterQueries) {

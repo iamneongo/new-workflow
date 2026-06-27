@@ -560,11 +560,15 @@ async function handleBotUpdate(update: any) {
                  supply_msg_id = $1,
                  supplier_route_id = $2,
                  selected_supplier_group_id = $3,
-                 selected_supplier_thread_id = $4
-             WHERE id = $5`,
+                 selected_supplier_thread_id = $4,
+                 supply_prompt_group_id = $5,
+                 supply_prompt_thread_id = $6
+             WHERE id = $7`,
             [
               promptData.result.message_id,
               selectedRoute.id,
+              selectedRoute.groupId,
+              selectedRoute.threadId,
               selectedRoute.groupId,
               selectedRoute.threadId,
               logId,
@@ -1348,12 +1352,15 @@ function resolveSupplyListenTarget(autoSetup: any, log: any): {
   threadId: number | null;
 } {
   const groupIds = Array.from(new Set([
-    autoSetup.supplyListenGroupId,
+    log.supply_prompt_group_id,
     log.selected_supplier_group_id,
+    autoSetup.supplyListenGroupId,
     autoSetup.supplyGroupId,
   ].map((item) => normalizeComparableChatId(item)).filter(Boolean)));
 
   const threadIds = Array.from(new Set([
+    ...(Array.isArray(log.supply_prompt_thread_id) ? normalizeThreadIds(log.supply_prompt_thread_id) : []),
+    log.supply_prompt_thread_id,
     ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
     autoSetup.supplyListenThreadId,
     log.selected_supplier_thread_id,
