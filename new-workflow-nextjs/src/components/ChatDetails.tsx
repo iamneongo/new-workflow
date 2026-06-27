@@ -79,6 +79,8 @@ export default function ChatDetails({
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
+  const [supplyListenGroupIdInput, setSupplyListenGroupIdInput] = useState('');
+  const [supplyListenThreadIdInput, setSupplyListenThreadIdInput] = useState<number | ''>('');
   const [supplierRoutesInput, setSupplierRoutesInput] = useState<SupplierRoute[]>([]);
   const [supplyChangeGroupIdInput, setSupplyChangeGroupIdInput] = useState('');
   const [supplyChangeThreadIdInput, setSupplyChangeThreadIdInput] = useState<number | ''>('');
@@ -148,6 +150,12 @@ export default function ChatDetails({
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
+      setSupplyListenGroupIdInput(automation.supplyListenGroupId || automation.supplyGroupId || '');
+      setSupplyListenThreadIdInput(automation.supplyListenThreadId !== null && automation.supplyListenThreadId !== undefined
+        ? automation.supplyListenThreadId
+        : automation.supplyThreadId !== null && automation.supplyThreadId !== undefined
+          ? automation.supplyThreadId
+          : '');
       setSupplierRoutesInput(Array.isArray(automation.supplierRoutes)
         ? automation.supplierRoutes
         : []);
@@ -324,6 +332,8 @@ export default function ChatDetails({
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
         updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
+        updates.supplyListenGroupId = supplyListenGroupIdInput;
+        updates.supplyListenThreadId = supplyListenThreadIdInput === '' ? null : Number(supplyListenThreadIdInput);
         updates.supplierRoutes = supplierRoutesInput;
       }
       if (field === 'supplyChange') {
@@ -1440,7 +1450,7 @@ export default function ChatDetails({
                     <h5 className="node-title">Hỏi phương án cung cấp</h5>
                     
                     {editCard === 'supply' ? (
-                      <div id="tour-supply-editor">
+                      <div id="tour-supply-editor" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {renderGroupTopicSelector(
                           supplyGroupIdInput,
                           setSupplyGroupIdInput,
@@ -1451,6 +1461,18 @@ export default function ChatDetails({
                           supplierRoutesEditor,
                           { selectorId: 'supply' }
                         )}
+                        <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
+                          {renderGroupTopicSelector(
+                            supplyListenGroupIdInput,
+                            setSupplyListenGroupIdInput,
+                            supplyListenThreadIdInput,
+                            setSupplyListenThreadIdInput,
+                            () => setEditCard(null),
+                            () => handleSaveCard('supply'),
+                            undefined,
+                            { selectorId: 'supply-listen', topicLabel: 'Kênh/Topic lắng nghe:' }
+                          )}
+                        </div>
                       </div>
                     ) : (
                       <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1462,6 +1484,14 @@ export default function ChatDetails({
                         ) : (
                           <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm lựa chọn vật tư.</span>
                         )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic lắng nghe:</span>
+                          {automation.supplyListenGroupId
+                            ? renderGroupTopicBadge(automation.supplyListenGroupId, automation.supplyListenThreadId)
+                            : (
+                              <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Dùng mặc định theo nhóm phía trên</span>
+                            )}
+                        </div>
 
                         <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
                           Nhánh CT: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}

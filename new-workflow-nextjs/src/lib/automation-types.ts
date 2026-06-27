@@ -46,6 +46,8 @@ export interface AutomationSetup {
   approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplyListenGroupId: string;
+  supplyListenThreadId: number | null;
   supplyChangeGroupId: string;
   supplyChangeThreadId: number | null;
   supplyChangeMessageMode: SupplyChangeMessageMode;
