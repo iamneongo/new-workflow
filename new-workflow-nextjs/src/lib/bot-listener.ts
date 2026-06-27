@@ -426,9 +426,8 @@ async function handleBotUpdate(update: any) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await updateCallbackStatus('ℹ️ Tin này không thuộc kênh/topic lắng nghe của Bước 3 nên bot dừng ở bước phê duyệt.', 'callback non-listen approval');
+            return;
           }
-          return;
 
         } else if (action === 'appr_disagree') {
           if (log.status !== 'pending') {
