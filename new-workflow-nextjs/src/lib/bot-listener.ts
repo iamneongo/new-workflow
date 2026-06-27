@@ -701,14 +701,6 @@ async function handleBotUpdate(update: any) {
           }),
         });
 
-        const changeRequestGroupId = autoSetup.supplyChangeGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId;
-        const changeRequestThreadId = autoSetup.supplyChangeThreadId || log.selected_supplier_thread_id || autoSetup.supplyThreadId || undefined;
-        if (isChange && !changeRequestGroupId) {
-          console.warn(`[BotListener] Change request group is not configured for automation: ${log.automation_id}. Cannot send change request notice.`);
-          await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo thay đổi vật tư.', 'callback missing change group');
-          return;
-        }
-
         // Send reject/change notification
         const rejectTarget = resolveSupplyRejectTarget(autoSetup, log);
         if (!isChange && !rejectTarget.groupId) {
@@ -723,11 +715,11 @@ async function handleBotUpdate(update: any) {
           });
         }
         const rejectText = isChange
-          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 *Hãy REPLY trực tiếp vào tin nhắn này.* Bot sẽ chuyển nội dung phản hồi sang group đã cấu hình để mọi người cùng biết nhà cung ứng muốn thay đổi gì.`
+          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 *Hãy REPLY trực tiếp vào tin nhắn này.* Bot sẽ chuyển nội dung phản hồi sang group/topic đã cấu hình để mọi người cùng biết nhà cung ứng muốn thay đổi gì.`
           : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: isChange ? changeRequestGroupId : rejectTarget.groupId,
-          message_thread_id: isChange ? changeRequestThreadId : (rejectTarget.threadId || undefined),
+          chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
+          message_thread_id: isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined),
           text: rejectText,
         }, 'reject/change notice');
         if (isChange && rejectData.ok) {
