@@ -213,6 +213,7 @@ export interface AutomationSetup {
   approvalMessageMode: ApprovalMessageMode;
   approvalCustomMessage: string;
   supplyGroupId: string;
+  supplyThreadIds: number[];
   supplyThreadId: number | null;
   supplyChangeGroupId: string;
   supplyChangeThreadId: number | null;
@@ -286,6 +287,7 @@ export async function ensureDatabase(): Promise<void> {
         approval_message_mode VARCHAR(20),
         approval_custom_message TEXT,
         supply_group_id VARCHAR(100),
+        supply_thread_ids INTEGER[],
         supply_thread_id INTEGER,
         supply_change_group_id VARCHAR(100),
         supply_change_thread_id INTEGER,
@@ -314,6 +316,7 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_message_mode VARCHAR(20)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_custom_message TEXT',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_ids INTEGER[]',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_thread_id INTEGER',
@@ -337,6 +340,12 @@ export async function ensureDatabase(): Promise<void> {
       UPDATE automation_setups
       SET source_thread_ids = ARRAY[source_thread_id]
       WHERE source_thread_ids IS NULL AND source_thread_id IS NOT NULL
+    `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET supply_thread_ids = ARRAY[supply_thread_id]
+      WHERE supply_thread_ids IS NULL AND supply_thread_id IS NOT NULL
     `);
 
     await client.query(`
@@ -634,6 +643,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalMessageMode: 'forward',
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   supplyGroupId: '',
+  supplyThreadIds: [],
   supplyThreadId: null,
   supplyChangeGroupId: '',
   supplyChangeThreadId: null,
@@ -663,6 +673,7 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
     const res = await p.query('SELECT * FROM automation_setups ORDER BY name ASC');
     return res.rows.map((row) => {
       const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
+      const supplyThreadIds = readStoredThreadIds(row.supply_thread_ids, row.supply_thread_id);
       return {
         id: row.id,
         name: row.name,
@@ -675,7 +686,8 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
-        supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplyThreadIds,
+        supplyThreadId: supplyThreadIds[0] ?? null,
         supplyChangeGroupId: row.supply_change_group_id || '',
         supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
         supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',
@@ -711,6 +723,7 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
     if (res.rows.length === 0) return null;
     const row = res.rows[0];
     const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
+    const supplyThreadIds = readStoredThreadIds(row.supply_thread_ids, row.supply_thread_id);
     return {
       id: row.id,
       name: row.name,
@@ -723,7 +736,8 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
       approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
       supplyGroupId: row.supply_group_id || '',
-      supplyThreadId: normalizeThreadId(row.supply_thread_id),
+      supplyThreadIds,
+      supplyThreadId: supplyThreadIds[0] ?? null,
       supplyChangeGroupId: row.supply_change_group_id || '',
       supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
       supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',
@@ -762,11 +776,19 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         ? normalizeThreadIds(setup.sourceThreadId)
         : current.sourceThreadIds;
     const storedSourceThreadIds = sourceThreadIds.length > 0 ? sourceThreadIds : null;
+    const supplyThreadIds = hasField('supplyThreadIds')
+      ? normalizeThreadIds(setup.supplyThreadIds)
+      : hasField('supplyThreadId')
+        ? normalizeThreadIds(setup.supplyThreadId)
+        : current.supplyThreadIds;
+    const storedSupplyThreadIds = supplyThreadIds.length > 0 ? supplyThreadIds : null;
     const updated = {
       ...current,
       ...setup,
       sourceThreadIds,
       sourceThreadId: sourceThreadIds[0] ?? null,
+      supplyThreadIds,
+      supplyThreadId: supplyThreadIds[0] ?? null,
       approvalMessageMode: hasField('approvalMessageMode')
         ? normalizeApprovalMessageMode(setup.approvalMessageMode)
         : current.approvalMessageMode,
@@ -777,7 +799,6 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         ? normalizeSupplierRoutes(setup.supplierRoutes)
         : current.supplierRoutes,
       approvalThreadId: hasField('approvalThreadId') ? normalizeThreadId(setup.approvalThreadId) : current.approvalThreadId,
-      supplyThreadId: hasField('supplyThreadId') ? normalizeThreadId(setup.supplyThreadId) : current.supplyThreadId,
       supplyChangeGroupId: hasField('supplyChangeGroupId') ? (typeof setup.supplyChangeGroupId === 'string' ? setup.supplyChangeGroupId : String(setup.supplyChangeGroupId ?? '')) : current.supplyChangeGroupId,
       supplyChangeThreadId: hasField('supplyChangeThreadId') ? normalizeThreadId(setup.supplyChangeThreadId) : current.supplyChangeThreadId,
       supplyChangeMessageMode: hasField('supplyChangeMessageMode')
@@ -795,13 +816,13 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         INSERT INTO automation_setups (
         id, name, source_group_id, source_thread_id, source_thread_ids,
         approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message,
-        supply_group_id, supply_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
+        supply_group_id, supply_thread_id, supply_thread_ids, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
@@ -813,6 +834,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         approval_custom_message = EXCLUDED.approval_custom_message,
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
+        supply_thread_ids = EXCLUDED.supply_thread_ids,
         supply_change_group_id = EXCLUDED.supply_change_group_id,
         supply_change_thread_id = EXCLUDED.supply_change_thread_id,
         supply_change_message_mode = EXCLUDED.supply_change_message_mode,
@@ -840,6 +862,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.approvalCustomMessage,
       updated.supplyGroupId,
       updated.supplyThreadId,
+      storedSupplyThreadIds,
       updated.supplyChangeGroupId,
       updated.supplyChangeThreadId,
       updated.supplyChangeMessageMode,
@@ -889,6 +912,7 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
     const res = await p.query('SELECT * FROM automation_setups WHERE is_listening = true');
     return res.rows.map((row) => {
       const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
+      const supplyThreadIds = readStoredThreadIds(row.supply_thread_ids, row.supply_thread_id);
       return {
         id: row.id,
         name: row.name,
@@ -901,7 +925,8 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
         approvalCustomMessage: row.approval_custom_message || DEFAULT_APPROVAL_CUSTOM_MESSAGE,
         supplyGroupId: row.supply_group_id || '',
-        supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplyThreadIds,
+        supplyThreadId: supplyThreadIds[0] ?? null,
         supplyChangeGroupId: row.supply_change_group_id || '',
         supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
         supplyChangeMessageMode: row.supply_change_message_mode === 'copy' ? 'copy' : 'forward',

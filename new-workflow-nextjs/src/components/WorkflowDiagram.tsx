@@ -131,7 +131,7 @@ export default function WorkflowDiagram() {
                 <div className="node-content">
                   <span className="node-tag">Bước 3: Lựa chọn vật tư</span>
                   <h5 className="node-title">Hỏi phương án cung cấp</h5>
-                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi. Tin CT hợp lệ sẽ hiển thị danh sách nhà cung ứng để chọn trước khi gửi tiếp:</p>
+                  <p className="node-text">Hỏi ý kiến nhóm đích với 3 phương án phản hồi. Có thể giới hạn nhiều topic nhà cung ứng để chỉ nhận phản hồi đúng nơi đã cấu hình:</p>
                   <div className="node-options-list">
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Đồng ý cung cấp vật tư</div>
                     <div className="opt-item"><i className="fa-solid fa-circle-dot" /> Không đồng ý cung cấp vật tư</div>

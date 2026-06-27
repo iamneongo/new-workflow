@@ -41,6 +41,7 @@ export interface ActiveListener {
   approvalCustomMessage: string;
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplyThreadIds: number[];
   supplierRoutes: SupplierRoute[];
   deliveryGroupId: string;
   deliveryThreadId: number | null;
@@ -186,6 +187,7 @@ export async function autoStartFromConfig(): Promise<void> {
           approvalCustomMessage: setup.approvalCustomMessage,
           supplyGroupId: setup.supplyGroupId,
           supplyThreadId: setup.supplyThreadId,
+          supplyThreadIds: setup.supplyThreadIds,
           supplierRoutes: setup.supplierRoutes,
           deliveryGroupId: setup.deliveryGroupId,
           deliveryThreadId: setup.deliveryThreadId,
@@ -609,6 +611,7 @@ async function handleBotUpdate(update: any) {
         }
 
         const expectedSupplyGroupId = log.selected_supplier_group_id || autoSetup.supplyGroupId;
+        const callbackThreadId = normalizeThreadId(cq.message.message_thread_id);
         if (expectedSupplyGroupId) {
           const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
           const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
@@ -616,6 +619,10 @@ async function handleBotUpdate(update: any) {
             await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply agree mismatch');
             return;
           }
+        }
+        if (!isThreadAllowed(callbackThreadId, autoSetup.supplyThreadIds)) {
+          await updateCallbackStatus('⚠️ Bỏ qua vì topic không nằm trong danh sách nhà cung ứng đã cấu hình.', 'callback supply agree topic mismatch');
+          return;
         }
 
         await p.query("UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1", [logId]);
@@ -665,6 +672,7 @@ async function handleBotUpdate(update: any) {
         }
 
         const expectedSupplyGroupId = log.selected_supplier_group_id || autoSetup.supplyGroupId;
+        const callbackThreadId = normalizeThreadId(cq.message.message_thread_id);
         if (expectedSupplyGroupId) {
           const normExpected = expectedSupplyGroupId.replace(/^-100/, '').replace(/^-/, '');
           const normActual = String(cq.message.chat.id).replace(/^-100/, '').replace(/^-/, '');
@@ -672,6 +680,10 @@ async function handleBotUpdate(update: any) {
             await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyGroupId}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply decision mismatch');
             return;
           }
+        }
+        if (!isThreadAllowed(callbackThreadId, autoSetup.supplyThreadIds)) {
+          await updateCallbackStatus('⚠️ Bỏ qua vì topic không nằm trong danh sách nhà cung ứng đã cấu hình.', 'callback supply decision topic mismatch');
+          return;
         }
 
         const isChange = action === 'supply_change';
@@ -691,7 +703,7 @@ async function handleBotUpdate(update: any) {
         });
 
         const changeRequestGroupId = autoSetup.supplyChangeGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId;
-        const changeRequestThreadId = autoSetup.supplyChangeThreadId || log.selected_supplier_thread_id || autoSetup.supplyThreadId || undefined;
+        const changeRequestThreadId = autoSetup.supplyChangeThreadId || log.selected_supplier_thread_id || getPrimaryConfiguredThreadId(autoSetup.supplyThreadIds, autoSetup.supplyThreadId) || undefined;
         if (isChange && !changeRequestGroupId) {
           console.warn(`[BotListener] Change request group is not configured for automation: ${log.automation_id}. Cannot send change request notice.`);
           await updateCallbackStatus('❌ Chưa cấu hình nhóm nhận thông báo thay đổi vật tư.', 'callback missing change group');
@@ -834,10 +846,18 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
+          const sourceThreadId = normalizeThreadId(msg.message_thread_id);
           const normSourceGroup = normalizeComparableChatId(sourceGroupId);
           const normChatId = normalizeComparableChatId(chatId);
           if (normSourceGroup !== normChatId) {
             emitListenerLog('warn', `Bỏ qua reply change do chat không khớp. Reply chat=${chatId}, config=${sourceGroupId}.`, {
+              automationId: log.automation_id,
+              step: 'supply-change-reply',
+            });
+            continue;
+          }
+          if ((sourceGroupId === autoSetup.supplyGroupId || sourceGroupId === log.selected_supplier_group_id) && !isThreadAllowed(sourceThreadId, autoSetup.supplyThreadIds)) {
+            emitListenerLog('warn', `Bỏ qua reply change do topic không nằm trong danh sách đã cấu hình. Reply topic=${sourceThreadId ?? 'general'}.`, {
               automationId: log.automation_id,
               step: 'supply-change-reply',
             });
@@ -848,7 +868,7 @@ async function handleBotUpdate(update: any) {
           const replyText = msg.text || msg.caption || '';
           const relayHeader = `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Người phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới được bot chuyển tiếp từ tin nhắn reply.`;
           const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-          const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
+          const relayThreadId = autoSetup.supplyChangeThreadId || getPrimaryConfiguredThreadId(autoSetup.supplyThreadIds, autoSetup.supplyThreadId) || undefined;
 
           const relayData = await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: targetGroupId,
@@ -1131,6 +1151,7 @@ export async function startListenerForAutomation(automationId: string): Promise<
     approvalCustomMessage: setup.approvalCustomMessage,
     supplyGroupId: setup.supplyGroupId,
     supplyThreadId: setup.supplyThreadId,
+    supplyThreadIds: setup.supplyThreadIds,
     supplierRoutes: setup.supplierRoutes,
     deliveryGroupId: setup.deliveryGroupId,
     deliveryThreadId: setup.deliveryThreadId,
@@ -1305,6 +1326,21 @@ function normalizeComparableChatId(chatId: string | number | null | undefined): 
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
 }
 
+function getPrimaryConfiguredThreadId(threadIds: number[] | null | undefined, threadId: number | null | undefined): number | null {
+  if (Array.isArray(threadIds) && threadIds.length > 0) {
+    return threadIds[0];
+  }
+  return normalizeThreadId(threadId);
+}
+
+function isThreadAllowed(threadId: number | null | undefined, allowedThreadIds: number[] | null | undefined): boolean {
+  if (!Array.isArray(allowedThreadIds) || allowedThreadIds.length === 0) {
+    return true;
+  }
+  const normalized = normalizeThreadId(threadId);
+  return normalized !== null && allowedThreadIds.includes(normalized);
+}
+
 function resolveApprovalRejectTarget(autoSetup: any): { groupId: string; threadId: number | null; usedFallback: boolean } {
   const groupId = autoSetup.rejectGroupId || autoSetup.approvalGroupId || '';
   const threadId = autoSetup.rejectThreadId ?? autoSetup.approvalThreadId ?? null;
@@ -1317,7 +1353,7 @@ function resolveApprovalRejectTarget(autoSetup: any): { groupId: string; threadI
 
 function resolveSupplyRejectTarget(autoSetup: any, log: any): { groupId: string; threadId: number | null; usedFallback: boolean } {
   const groupId = autoSetup.rejectGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId || '';
-  const threadId = autoSetup.rejectThreadId ?? log.selected_supplier_thread_id ?? autoSetup.supplyThreadId ?? null;
+  const threadId = autoSetup.rejectThreadId ?? log.selected_supplier_thread_id ?? getPrimaryConfiguredThreadId(autoSetup.supplyThreadIds, autoSetup.supplyThreadId);
   return {
     groupId,
     threadId,
@@ -1337,7 +1373,7 @@ function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
         id: 'legacy-supply',
         name: 'Nhà cung ứng mặc định',
         groupId: autoSetup.supplyGroupId,
-        threadId: autoSetup.supplyThreadId ?? null,
+        threadId: getPrimaryConfiguredThreadId(autoSetup.supplyThreadIds, autoSetup.supplyThreadId),
         messageMode: autoSetup.approvalMessageMode === 'copy' ? 'copy' : 'forward',
       },
     ];

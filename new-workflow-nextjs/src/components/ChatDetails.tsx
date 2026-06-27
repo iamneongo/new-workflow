@@ -78,7 +78,7 @@ export default function ChatDetails({
   const [approvalCustomMessageInput, setApprovalCustomMessageInput] = useState(DEFAULT_APPROVAL_CUSTOM_MESSAGE);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
-  const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
+  const [supplyThreadIdsInput, setSupplyThreadIdsInput] = useState<number[]>([]);
   const [supplierRoutesInput, setSupplierRoutesInput] = useState<SupplierRoute[]>([]);
   const [supplyChangeGroupIdInput, setSupplyChangeGroupIdInput] = useState('');
   const [supplyChangeThreadIdInput, setSupplyChangeThreadIdInput] = useState<number | ''>('');
@@ -147,7 +147,11 @@ export default function ChatDetails({
       setApprovalCustomMessageInput(automation.approvalCustomMessage || DEFAULT_APPROVAL_CUSTOM_MESSAGE);
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
-      setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
+      setSupplyThreadIdsInput(Array.isArray(automation.supplyThreadIds)
+        ? automation.supplyThreadIds
+        : automation.supplyThreadId !== null && automation.supplyThreadId !== undefined
+          ? [automation.supplyThreadId]
+          : []);
       setSupplierRoutesInput(Array.isArray(automation.supplierRoutes)
         ? automation.supplierRoutes
         : []);
@@ -323,7 +327,8 @@ export default function ChatDetails({
       }
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
-        updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
+        updates.supplyThreadIds = supplyThreadIdsInput;
+        updates.supplyThreadId = supplyThreadIdsInput[0] ?? null;
         updates.supplierRoutes = supplierRoutesInput;
       }
       if (field === 'supplyChange') {
@@ -1444,20 +1449,20 @@ export default function ChatDetails({
                         {renderGroupTopicSelector(
                           supplyGroupIdInput,
                           setSupplyGroupIdInput,
-                          supplyThreadIdInput,
-                          setSupplyThreadIdInput,
+                          supplyThreadIdsInput,
+                          setSupplyThreadIdsInput,
                           () => setEditCard(null),
                           () => handleSaveCard('supply'),
                           supplierRoutesEditor,
-                          { selectorId: 'supply' }
+                          { selectorId: 'supply', topicLabel: 'Chọn topic nhà cung ứng:' }
                         )}
                       </div>
                     ) : (
                       <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {automation.supplyGroupId ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                            <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Nhóm mặc định:</span>
-                            {renderGroupTopicBadge(automation.supplyGroupId, automation.supplyThreadId)}
+                            <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Nhóm/Topic mặc định:</span>
+                            {renderSourceGroupTopicBadge(automation.supplyGroupId, automation.supplyThreadIds)}
                           </div>
                         ) : (
                           <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm lựa chọn vật tư.</span>
@@ -1465,6 +1470,9 @@ export default function ChatDetails({
 
                         <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
                           Nhánh CT: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                          Có thể chọn nhiều topic để bot chỉ nhận phản hồi ở đúng các topic đã cấu hình.
                         </div>
                       </div>
                     )}
