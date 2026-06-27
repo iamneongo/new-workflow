@@ -234,31 +234,6 @@ export default function ChatDetails({
 
   const clampZoom = (value: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
 
-  const handleWheel = (e: React.WheelEvent) => {
-    if (!containerRef.current) return;
-    const target = e.target as HTMLElement;
-    if (
-      target.closest('button') ||
-      target.closest('a') ||
-      target.closest('input') ||
-      target.closest('select') ||
-      target.closest('textarea') ||
-      target.closest('[data-no-pan="true"]')
-    ) {
-      return;
-    }
-    e.preventDefault();
-    const rect = containerRef.current.getBoundingClientRect();
-    const pointerX = e.clientX - rect.left;
-    const pointerY = e.clientY - rect.top;
-    const nextZoom = clampZoom(zoom * (e.deltaY > 0 ? 0.92 : 1.08));
-    if (nextZoom === zoom) return;
-    const zoomFactor = nextZoom / zoom;
-    setPanX((prev) => pointerX - (pointerX - prev) * zoomFactor);
-    setPanY((prev) => pointerY - (pointerY - prev) * zoomFactor);
-    setZoom(nextZoom);
-  };
-
   const resetCanvasView = () => {
     setZoom(1);
     setPanX(0);
@@ -1182,7 +1157,6 @@ export default function ChatDetails({
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUpOrLeave}
         onMouseLeave={handleMouseUpOrLeave}
-        onWheel={handleWheel}
         style={{ cursor: isDragging ? 'grabbing' : 'grab', flex: 1, overflow: 'hidden', padding: '24px 10px', position: 'relative' }}
       >
         <div
