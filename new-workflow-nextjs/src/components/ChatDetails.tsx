@@ -670,7 +670,7 @@ export default function ChatDetails({
                 marginTop: '4px',
                 zIndex: 1000,
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
-                maxHeight: '260px',
+                maxHeight: '380px',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden'
@@ -705,179 +705,191 @@ export default function ChatDetails({
                 )}
               </div>
 
-              <div style={{ overflowY: 'auto', flex: 1, padding: '4px' }}>
-                {filteredChats.length === 0 ? (
-                  <div style={{ padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                    Không tìm thấy nhóm nào
-                  </div>
-                ) : (
-                  filteredChats.map((c) => {
-                    const isSelected = c.chatId === groupIdVal;
-                    return (
-                      <div
-                        key={c.chatId}
-                        data-no-pan="true"
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onWheel={(e) => e.stopPropagation()}
-                        onClick={() => {
-                          setGroupId(c.chatId);
-                          setThreadId(isMultiSelect ? [] : '');
-                          setOpenSelectorId(null);
-                          setGroupSearch('');
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '6px 8px',
-                          borderRadius: '3px',
-                          cursor: 'pointer',
-                          background: isSelected ? 'rgba(34, 158, 217, 0.08)' : 'transparent',
-                          transition: 'background 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'var(--bg-secondary)';
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.background = 'transparent';
-                        }}
-                      >
-                        {c.photoPath ? (
-                          <img 
-                            src={c.photoPath} 
-                            alt="" 
-                            style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }}
-                            onError={(e) => {
-                              (e.target as HTMLElement).style.display = 'none';
-                              const parent = (e.target as HTMLElement).parentElement;
-                              if (parent && !parent.querySelector('.fallback-list-icon')) {
-                                const fallback = document.createElement('span');
-                                fallback.className = 'fallback-list-icon';
-                                fallback.textContent = chatTypeIcon(c.chatType);
-                                parent.insertBefore(fallback, e.target as HTMLElement);
-                              }
-                            }}
-                          />
-                        ) : (
-                          <span>{chatTypeIcon(c.chatType)}</span>
-                        )}
-                        <span style={{ fontSize: '11px', fontWeight: isSelected ? '600' : '400', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {c.chatTitle}
-                        </span>
-                        {isSelected && (
-                          <i className="fa-solid fa-check" style={{ fontSize: '10px', color: 'var(--accent-blue)' }} />
-                        )}
+              <div style={{ overflowY: 'auto', flex: 1, padding: '4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {filteredChats.length === 0 ? (
+                    <div style={{ padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                      Không tìm thấy nhóm nào
+                    </div>
+                  ) : (
+                    filteredChats.map((c) => {
+                      const isSelected = c.chatId === groupIdVal;
+                      return (
+                        <div
+                          key={c.chatId}
+                          data-no-pan="true"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onWheel={(e) => e.stopPropagation()}
+                          onClick={() => {
+                            setGroupId(c.chatId);
+                            setThreadId(isMultiSelect ? [] : '');
+                            setOpenSelectorId(selectorId);
+                            setGroupSearch('');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px 8px',
+                            borderRadius: '3px',
+                            cursor: 'pointer',
+                            background: isSelected ? 'rgba(34, 158, 217, 0.08)' : 'transparent',
+                            transition: 'background 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) e.currentTarget.style.background = 'var(--bg-secondary)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          {c.photoPath ? (
+                            <img 
+                              src={c.photoPath} 
+                              alt="" 
+                              style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }}
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                                const parent = (e.target as HTMLElement).parentElement;
+                                if (parent && !parent.querySelector('.fallback-list-icon')) {
+                                  const fallback = document.createElement('span');
+                                  fallback.className = 'fallback-list-icon';
+                                  fallback.textContent = chatTypeIcon(c.chatType);
+                                  parent.insertBefore(fallback, e.target as HTMLElement);
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span>{chatTypeIcon(c.chatType)}</span>
+                          )}
+                          <span style={{ fontSize: '11px', fontWeight: isSelected ? '600' : '400', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {c.chatTitle}
+                          </span>
+                          {isSelected && (
+                            <i className="fa-solid fa-check" style={{ fontSize: '10px', color: 'var(--accent-blue)' }} />
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {selectedChat && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                    {!isMultiSelect && (
+                      <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
+                    )}
+
+                    {isMultiSelect && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          <button
+                            id={`tour-topic-select-all-${selectorId}`}
+                            type="button"
+                            onClick={() => setThreadId(topicsList.map((t) => t.threadId))}
+                            style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
+                          >
+                            Chọn tất cả
+                          </button>
+                          <button
+                            id={`tour-topic-clear-${selectorId}`}
+                            type="button"
+                            onClick={() => setThreadId([])}
+                            style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
+                          >
+                            Bỏ chọn
+                          </button>
+                        </div>
                       </div>
-                    );
-                  })
+                    )}
+
+                    <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                      {!topicsList.length
+                        ? 'Nhóm này chưa có chủ đề. Để trống để bot nghe tất cả tin nhắn trong nhóm.'
+                        : isMultiSelect
+                          ? 'Để trống = bot sẽ nghe toàn bộ chủ đề trong nhóm, bao gồm cả General.'
+                          : 'Chọn 1 topic, hoặc để trống để bot nghe tất cả tin nhắn trong nhóm.'}
+                    </div>
+
+                    {topicsList.length > 0 ? (
+                      isMultiSelect ? (
+                        <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {topicsList.map((t) => {
+                            const checked = selectedThreadIds.includes(t.threadId);
+                            return (
+                              <label
+                                key={t.threadId}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '6px 8px',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  background: checked ? 'rgba(34, 158, 217, 0.08)' : 'transparent',
+                                  border: checked ? '1px solid rgba(34, 158, 217, 0.2)' : '1px solid transparent',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    const next = checked
+                                      ? selectedThreadIds.filter((threadId) => threadId !== t.threadId)
+                                      : [...selectedThreadIds, t.threadId];
+                                    setThreadId(next);
+                                  }}
+                                  style={{ accentColor: 'var(--accent-blue)' }}
+                                />
+                                <span style={{ fontSize: '11px' }}>{t.topicIcon || '💬'}</span>
+                                <span style={{ fontSize: '11px', color: 'var(--color-text)', fontWeight: checked ? '600' : '400', flex: 1 }}>
+                                  {t.topicName}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <select
+                          id={`tour-topic-select-${selectorId}`}
+                          className="bot-select"
+                          value={threadIdVal}
+                          onChange={(e) => setThreadId(e.target.value ? Number(e.target.value) : '')}
+                          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+                        >
+                          <option value="">— Tất cả (General) —</option>
+                          {topicsList.map((t) => (
+                            <option key={t.threadId} value={t.threadId}>
+                              {t.topicIcon} {t.topicName}
+                            </option>
+                          ))}
+                        </select>
+                      )
+                    ) : (
+                      <div style={{ padding: '10px', fontSize: '11px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '4px', background: 'var(--bg-secondary)' }}>
+                        Nhóm này chưa có chủ đề. Để trống để bot nghe tất cả tin nhắn trong nhóm.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {extraControls && (
+                  <div style={{ paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                    {extraControls}
+                  </div>
+                )}
+
+                {!options?.hideActions && (
+                  <div id={`tour-selector-actions-${selectorId}`} style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                    <button className="btn btn-secondary" onClick={onCancel} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '4px' }}>Hủy</button>
+                    <button className="btn btn-primary" onClick={onSave} disabled={isSaving} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '4px', background: 'var(--accent-blue)' }}>Lưu</button>
+                  </div>
                 )}
               </div>
             </div>
           )}
         </div>
-
-        {/* Topic Selector - supports single or multi topic selection */}
-        {!isMultiSelect && topicsList.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
-            <select
-              id={`tour-topic-select-${selectorId}`}
-              className="bot-select"
-              value={threadIdVal}
-              onChange={(e) => setThreadId(e.target.value ? Number(e.target.value) : '')}
-              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
-            >
-              <option value="">— Tất cả (General) —</option>
-              {topicsList.map((t) => (
-                <option key={t.threadId} value={t.threadId}>
-                  {t.topicIcon} {t.topicName}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {isMultiSelect && (
-          <div id={`tour-topic-multi-${selectorId}`} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
-              <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                <button
-                  id={`tour-topic-select-all-${selectorId}`}
-                  type="button"
-                  onClick={() => setThreadId(topicsList.map((t) => t.threadId))}
-                  style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
-                >
-                  Chọn tất cả
-                </button>
-                <button
-                  id={`tour-topic-clear-${selectorId}`}
-                  type="button"
-                  onClick={() => setThreadId([])}
-                  style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer' }}
-                >
-                  Bỏ chọn
-                </button>
-              </div>
-            </div>
-
-            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-              Để trống = bot sẽ nghe toàn bộ chủ đề trong nhóm, bao gồm cả General.
-            </div>
-
-            {topicsList.length > 0 ? (
-              <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', background: 'var(--bg-primary)', padding: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {topicsList.map((t) => {
-                  const checked = selectedThreadIds.includes(t.threadId);
-                  return (
-                    <label
-                      key={t.threadId}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '6px 8px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        background: checked ? 'rgba(34, 158, 217, 0.08)' : 'transparent',
-                        border: checked ? '1px solid rgba(34, 158, 217, 0.2)' : '1px solid transparent',
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          const next = checked
-                            ? selectedThreadIds.filter((threadId) => threadId !== t.threadId)
-                            : [...selectedThreadIds, t.threadId];
-                          setThreadId(next);
-                        }}
-                        style={{ accentColor: 'var(--accent-blue)' }}
-                      />
-                      <span style={{ fontSize: '11px' }}>{t.topicIcon || '💬'}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--color-text)', fontWeight: checked ? '600' : '400', flex: 1 }}>
-                        {t.topicName}
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            ) : (
-              <div style={{ padding: '10px', fontSize: '11px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '4px', background: 'var(--bg-secondary)' }}>
-                Nhóm này chưa có chủ đề. Để trống để bot nghe tất cả tin nhắn trong nhóm.
-              </div>
-            )}
-          </div>
-        )}
-
-        {extraControls}
-
-        {!options?.hideActions && (
-          <div id={`tour-selector-actions-${selectorId}`} style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
-            <button className="btn btn-secondary" onClick={onCancel} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '4px' }}>Hủy</button>
-            <button className="btn btn-primary" onClick={onSave} disabled={isSaving} style={{ padding: '4px 8px', fontSize: '10px', borderRadius: '4px', background: 'var(--accent-blue)' }}>Lưu</button>
-          </div>
-        )}
       </div>
     );
   };
