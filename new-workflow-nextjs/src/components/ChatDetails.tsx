@@ -568,7 +568,7 @@ export default function ChatDetails({
     onCancel: () => void,
     onSave: () => void,
     extraControls?: React.ReactNode,
-    options?: { hideActions?: boolean; selectorId?: string }
+    options?: { hideActions?: boolean; selectorId?: string; topicLabel?: string }
   ) => {
     const selectorId = (options?.selectorId || `${groupIdVal || 'empty'}:${Array.isArray(threadIdVal) ? threadIdVal.join(',') : threadIdVal ?? 'root'}`)
       .toString()
@@ -774,7 +774,7 @@ export default function ChatDetails({
         {/* Topic Selector - supports single or multi topic selection */}
         {!isMultiSelect && topicsList.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Chọn chủ đề:</label>
+            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
             <select
               id={`tour-topic-select-${selectorId}`}
               className="bot-select"
@@ -795,7 +795,7 @@ export default function ChatDetails({
         {isMultiSelect && (
           <div id={`tour-topic-multi-${selectorId}`} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Chọn chủ đề:</label>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>{options?.topicLabel || 'Chọn chủ đề:'}</label>
               <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                 <button
                   id={`tour-topic-select-all-${selectorId}`}
@@ -957,7 +957,7 @@ export default function ChatDetails({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
           <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nhà cung ứng cho CT:</label>
-          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Tin CT hợp lệ cần bắt đầu bằng <code>CT:</code>, có dòng <code>HM:</code> và ít nhất 1 dòng vật tư đánh số.</span>
+          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Tin CT hợp lệ cần bắt đầu bằng <code>CT:</code>, có dòng <code>HM:</code> và ít nhất 1 dòng vật tư đánh số. Mỗi nhà cung ứng cũng có thể chọn topic riêng.</span>
         </div>
         <button
           id="tour-add-supplier-route"
@@ -1011,7 +1011,7 @@ export default function ChatDetails({
                   () => {},
                   () => {},
                   undefined,
-                  { hideActions: true, selectorId: route.id },
+                  { hideActions: true, selectorId: route.id, topicLabel: 'Chọn topic nhà cung ứng:' },
                 )}
               </div>
 
