@@ -215,6 +215,7 @@ export interface AutomationSetup {
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;
+  supplyListenThreadIds: number[];
   supplyListenThreadId: number | null;
   supplyChangeGroupId: string;
   supplyChangeThreadId: number | null;
@@ -290,6 +291,7 @@ export async function ensureDatabase(): Promise<void> {
         supply_group_id VARCHAR(100),
         supply_thread_id INTEGER,
         supply_listen_group_id VARCHAR(100),
+        supply_listen_thread_ids INTEGER[],
         supply_listen_thread_id INTEGER,
         supply_change_group_id VARCHAR(100),
         supply_change_thread_id INTEGER,
@@ -320,6 +322,7 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_group_id VARCHAR(100)',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_thread_ids INTEGER[]',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_change_thread_id INTEGER',
@@ -348,8 +351,27 @@ export async function ensureDatabase(): Promise<void> {
     await client.query(`
       UPDATE automation_setups
       SET supply_listen_group_id = COALESCE(supply_listen_group_id, supply_group_id),
-          supply_listen_thread_id = COALESCE(supply_listen_thread_id, supply_thread_id)
-      WHERE supply_listen_group_id IS NULL OR supply_listen_thread_id IS NULL
+          supply_listen_thread_ids = COALESCE(
+            supply_listen_thread_ids,
+            CASE
+              WHEN supply_listen_thread_id IS NOT NULL THEN ARRAY[supply_listen_thread_id]
+              WHEN supply_thread_id IS NOT NULL THEN ARRAY[supply_thread_id]
+              ELSE NULL
+            END
+          ),
+          supply_listen_thread_id = COALESCE(
+            supply_listen_thread_id,
+            CASE
+              WHEN supply_listen_thread_ids IS NOT NULL AND array_length(supply_listen_thread_ids, 1) > 0
+                THEN supply_listen_thread_ids[1]
+              WHEN supply_thread_id IS NOT NULL
+                THEN supply_thread_id
+              ELSE NULL
+            END
+          )
+      WHERE supply_listen_group_id IS NULL
+         OR supply_listen_thread_id IS NULL
+         OR supply_listen_thread_ids IS NULL
     `);
 
     await client.query(`
@@ -649,6 +671,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   supplyGroupId: '',
   supplyThreadId: null,
   supplyListenGroupId: '',
+  supplyListenThreadIds: [],
   supplyListenThreadId: null,
   supplyChangeGroupId: '',
   supplyChangeThreadId: null,
@@ -692,6 +715,7 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         supplyListenGroupId: row.supply_listen_group_id || '',
+        supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
         supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
         supplyChangeGroupId: row.supply_change_group_id || '',
         supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
@@ -742,6 +766,7 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       supplyGroupId: row.supply_group_id || '',
       supplyThreadId: normalizeThreadId(row.supply_thread_id),
       supplyListenGroupId: row.supply_listen_group_id || '',
+      supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
       supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
       supplyChangeGroupId: row.supply_change_group_id || '',
       supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),
@@ -800,9 +825,16 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       supplyListenGroupId: hasField('supplyListenGroupId')
         ? (typeof setup.supplyListenGroupId === 'string' ? setup.supplyListenGroupId : String(setup.supplyListenGroupId ?? ''))
         : current.supplyListenGroupId,
-      supplyListenThreadId: hasField('supplyListenThreadId')
-        ? normalizeThreadId(setup.supplyListenThreadId)
-        : current.supplyListenThreadId,
+      supplyListenThreadIds: hasField('supplyListenThreadIds')
+        ? normalizeThreadIds(setup.supplyListenThreadIds)
+        : hasField('supplyListenThreadId')
+          ? normalizeThreadIds(setup.supplyListenThreadId)
+          : current.supplyListenThreadIds,
+      supplyListenThreadId: hasField('supplyListenThreadIds')
+        ? (normalizeThreadIds(setup.supplyListenThreadIds)[0] ?? null)
+        : hasField('supplyListenThreadId')
+          ? normalizeThreadId(setup.supplyListenThreadId)
+          : current.supplyListenThreadId,
       supplyChangeGroupId: hasField('supplyChangeGroupId') ? (typeof setup.supplyChangeGroupId === 'string' ? setup.supplyChangeGroupId : String(setup.supplyChangeGroupId ?? '')) : current.supplyChangeGroupId,
       supplyChangeThreadId: hasField('supplyChangeThreadId') ? normalizeThreadId(setup.supplyChangeThreadId) : current.supplyChangeThreadId,
       supplyChangeMessageMode: hasField('supplyChangeMessageMode')
@@ -820,13 +852,13 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         INSERT INTO automation_setups (
         id, name, source_group_id, source_thread_id, source_thread_ids,
         approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message,
-        supply_group_id, supply_thread_id, supply_listen_group_id, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
+        supply_group_id, supply_thread_id, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         source_group_id = EXCLUDED.source_group_id,
@@ -839,6 +871,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
         supply_listen_group_id = EXCLUDED.supply_listen_group_id,
+        supply_listen_thread_ids = EXCLUDED.supply_listen_thread_ids,
         supply_listen_thread_id = EXCLUDED.supply_listen_thread_id,
         supply_change_group_id = EXCLUDED.supply_change_group_id,
         supply_change_thread_id = EXCLUDED.supply_change_thread_id,
@@ -868,6 +901,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.supplyGroupId,
       updated.supplyThreadId,
       updated.supplyListenGroupId,
+      updated.supplyListenThreadIds.length > 0 ? updated.supplyListenThreadIds : null,
       updated.supplyListenThreadId,
       updated.supplyChangeGroupId,
       updated.supplyChangeThreadId,
@@ -932,6 +966,7 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
         supplyListenGroupId: row.supply_listen_group_id || '',
+        supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
         supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
         supplyChangeGroupId: row.supply_change_group_id || '',
         supplyChangeThreadId: normalizeThreadId(row.supply_change_thread_id),

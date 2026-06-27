@@ -47,6 +47,7 @@ export interface AutomationSetup {
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;
+  supplyListenThreadIds: number[];
   supplyListenThreadId: number | null;
   supplyChangeGroupId: string;
   supplyChangeThreadId: number | null;

@@ -80,7 +80,7 @@ export default function ChatDetails({
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
   const [supplyListenGroupIdInput, setSupplyListenGroupIdInput] = useState('');
-  const [supplyListenThreadIdInput, setSupplyListenThreadIdInput] = useState<number | ''>('');
+  const [supplyListenThreadIdsInput, setSupplyListenThreadIdsInput] = useState<number[]>([]);
   const [supplierRoutesInput, setSupplierRoutesInput] = useState<SupplierRoute[]>([]);
   const [supplyChangeGroupIdInput, setSupplyChangeGroupIdInput] = useState('');
   const [supplyChangeThreadIdInput, setSupplyChangeThreadIdInput] = useState<number | ''>('');
@@ -151,11 +151,13 @@ export default function ChatDetails({
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
       setSupplyListenGroupIdInput(automation.supplyListenGroupId || automation.supplyGroupId || '');
-      setSupplyListenThreadIdInput(automation.supplyListenThreadId !== null && automation.supplyListenThreadId !== undefined
-        ? automation.supplyListenThreadId
-        : automation.supplyThreadId !== null && automation.supplyThreadId !== undefined
-          ? automation.supplyThreadId
-          : '');
+      setSupplyListenThreadIdsInput(Array.isArray(automation.supplyListenThreadIds) && automation.supplyListenThreadIds.length > 0
+        ? automation.supplyListenThreadIds
+        : automation.supplyListenThreadId !== null && automation.supplyListenThreadId !== undefined
+          ? [automation.supplyListenThreadId]
+          : automation.supplyThreadId !== null && automation.supplyThreadId !== undefined
+            ? [automation.supplyThreadId]
+            : []);
       setSupplierRoutesInput(Array.isArray(automation.supplierRoutes)
         ? automation.supplierRoutes
         : []);
@@ -333,7 +335,8 @@ export default function ChatDetails({
         updates.supplyGroupId = supplyGroupIdInput;
         updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
         updates.supplyListenGroupId = supplyListenGroupIdInput;
-        updates.supplyListenThreadId = supplyListenThreadIdInput === '' ? null : Number(supplyListenThreadIdInput);
+        updates.supplyListenThreadIds = supplyListenThreadIdsInput;
+        updates.supplyListenThreadId = supplyListenThreadIdsInput[0] ?? null;
         updates.supplierRoutes = supplierRoutesInput;
       }
       if (field === 'supplyChange') {
@@ -479,10 +482,14 @@ export default function ChatDetails({
     );
   };
 
-  const renderGroupTopicBadge = (groupId: string, threadId: number | null) => {
+  const renderGroupTopicBadge = (groupId: string, threadId: number | number[] | null) => {
     const chat = chats[groupId];
     if (!chat) return groupId ? <span style={{ color: 'var(--color-text-muted)', fontSize: '11px' }}>🟢 ID: {groupId}</span> : null;
-    const topic = threadId !== null ? chat.topics[threadId] : null;
+    const threadIds = Array.isArray(threadId) ? threadId : threadId !== null ? [threadId] : [];
+    const topics = threadIds
+      .map((id) => chat.topics[id])
+      .filter((topic): topic is TopicEntry => Boolean(topic));
+    const missingThreadIds = threadIds.filter((id) => !chat.topics[id]);
     const chatTypeIcon = chat.chatType === 'supergroup' ? '🏛' : chat.chatType === 'channel' ? '📢' : '👥';
 
     return (
@@ -509,12 +516,22 @@ export default function ChatDetails({
           )}
           <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{chat.chatTitle}</span>
         </span>
-        {topic && (
+        {threadIds.length > 0 && (
           <>
             <span style={{ color: 'var(--color-text-muted)', fontSize: '9px' }}>➔</span>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-              <span>{topic.topicIcon || '💬'}</span>
-              <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{topic.topicName}</span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px' }}>
+              {topics.map((topic) => (
+                <span key={topic.threadId} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <span>{topic.topicIcon || '💬'}</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{topic.topicName}</span>
+                </span>
+              ))}
+              {missingThreadIds.map((id) => (
+                <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(245, 158, 11, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                  <span>💬</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>Chủ đề #{id}</span>
+                </span>
+              ))}
             </span>
           </>
         )}
@@ -1462,15 +1479,18 @@ export default function ChatDetails({
                           { selectorId: 'supply' }
                         )}
                         <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
+                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600', marginBottom: '4px' }}>
+                            Cài đặt kênh lắng nghe
+                          </div>
                           {renderGroupTopicSelector(
                             supplyListenGroupIdInput,
                             setSupplyListenGroupIdInput,
-                            supplyListenThreadIdInput,
-                            setSupplyListenThreadIdInput,
+                            supplyListenThreadIdsInput,
+                            setSupplyListenThreadIdsInput,
                             () => setEditCard(null),
                             () => handleSaveCard('supply'),
                             undefined,
-                            { selectorId: 'supply-listen', topicLabel: 'Kênh/Topic lắng nghe:' }
+                            { selectorId: 'supply-listen', topicLabel: 'Chọn topic lắng nghe:' }
                           )}
                         </div>
                       </div>
@@ -1487,7 +1507,12 @@ export default function ChatDetails({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                           <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic lắng nghe:</span>
                           {automation.supplyListenGroupId
-                            ? renderGroupTopicBadge(automation.supplyListenGroupId, automation.supplyListenThreadId)
+                            ? renderGroupTopicBadge(
+                              automation.supplyListenGroupId,
+                              automation.supplyListenThreadIds && automation.supplyListenThreadIds.length > 0
+                                ? automation.supplyListenThreadIds
+                                : automation.supplyListenThreadId
+                            )
                             : (
                               <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Dùng mặc định theo nhóm phía trên</span>
                             )}

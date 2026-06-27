@@ -19,6 +19,7 @@ import {
   loadDatabase,
   getPool,
   normalizeThreadId,
+  normalizeThreadIds,
   ApprovalMessageMode,
   FinalMessageMode,
   SupplierRoute,
@@ -42,6 +43,7 @@ export interface ActiveListener {
   supplyGroupId: string;
   supplyThreadId: number | null;
   supplyListenGroupId: string;
+  supplyListenThreadIds: number[];
   supplyListenThreadId: number | null;
   supplierRoutes: SupplierRoute[];
   deliveryGroupId: string;
@@ -189,6 +191,7 @@ export async function autoStartFromConfig(): Promise<void> {
           supplyGroupId: setup.supplyGroupId,
           supplyThreadId: setup.supplyThreadId,
           supplyListenGroupId: setup.supplyListenGroupId,
+          supplyListenThreadIds: setup.supplyListenThreadIds,
           supplyListenThreadId: setup.supplyListenThreadId,
           supplierRoutes: setup.supplierRoutes,
           deliveryGroupId: setup.deliveryGroupId,
@@ -622,10 +625,10 @@ async function handleBotUpdate(update: any) {
             return;
           }
         }
-        if (expectedSupplyListenTarget.threadId !== null) {
+        if (expectedSupplyListenTarget.threadIds.length > 0) {
           const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (actualThreadId !== expectedSupplyListenTarget.threadId) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadId}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply agree topic mismatch');
+          if (actualThreadId === null || !expectedSupplyListenTarget.threadIds.includes(actualThreadId)) {
+            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply agree topic mismatch');
             return;
           }
         }
@@ -686,10 +689,10 @@ async function handleBotUpdate(update: any) {
             return;
           }
         }
-        if (expectedSupplyListenTarget.threadId !== null) {
+        if (expectedSupplyListenTarget.threadIds.length > 0) {
           const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (actualThreadId !== expectedSupplyListenTarget.threadId) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadId}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply decision topic mismatch');
+          if (actualThreadId === null || !expectedSupplyListenTarget.threadIds.includes(actualThreadId)) {
+            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply decision topic mismatch');
             return;
           }
         }
@@ -855,7 +858,17 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          const expectedThreadId = autoSetup.supplyListenThreadId ?? autoSetup.supplyChangeThreadId ?? log.selected_supplier_thread_id ?? autoSetup.supplyThreadId ?? null;
+          const expectedThreadIds = Array.isArray(autoSetup.supplyListenThreadIds) && autoSetup.supplyListenThreadIds.length > 0
+            ? normalizeThreadIds(autoSetup.supplyListenThreadIds)
+            : autoSetup.supplyListenThreadId !== null && autoSetup.supplyListenThreadId !== undefined
+              ? normalizeThreadIds([autoSetup.supplyListenThreadId])
+              : autoSetup.supplyChangeThreadId !== null && autoSetup.supplyChangeThreadId !== undefined
+                ? normalizeThreadIds([autoSetup.supplyChangeThreadId])
+                : log.selected_supplier_thread_id !== null && log.selected_supplier_thread_id !== undefined
+                  ? normalizeThreadIds([log.selected_supplier_thread_id])
+                  : autoSetup.supplyThreadId !== null && autoSetup.supplyThreadId !== undefined
+                    ? normalizeThreadIds([autoSetup.supplyThreadId])
+                    : [];
           const normSourceGroup = normalizeComparableChatId(sourceGroupId);
           const normChatId = normalizeComparableChatId(chatId);
           if (normSourceGroup !== normChatId) {
@@ -865,8 +878,8 @@ async function handleBotUpdate(update: any) {
             });
             continue;
           }
-          if (expectedThreadId !== null && replyThreadId !== expectedThreadId) {
-            emitListenerLog('warn', `Bỏ qua reply change do topic không khớp. Reply topic=${replyThreadId ?? 'general'}, config=${expectedThreadId}.`, {
+          if (expectedThreadIds.length > 0 && (replyThreadId === null || !expectedThreadIds.includes(replyThreadId))) {
+            emitListenerLog('warn', `Bỏ qua reply change do topic không khớp. Reply topic=${replyThreadId ?? 'general'}, config=${expectedThreadIds.join(', ')}.`, {
               automationId: log.automation_id,
               step: 'supply-change-reply',
             });
@@ -1161,6 +1174,7 @@ export async function startListenerForAutomation(automationId: string): Promise<
     supplyGroupId: setup.supplyGroupId,
     supplyThreadId: setup.supplyThreadId,
     supplyListenGroupId: setup.supplyListenGroupId,
+    supplyListenThreadIds: setup.supplyListenThreadIds,
     supplyListenThreadId: setup.supplyListenThreadId,
     supplierRoutes: setup.supplierRoutes,
     deliveryGroupId: setup.deliveryGroupId,
@@ -1336,10 +1350,20 @@ function normalizeComparableChatId(chatId: string | number | null | undefined): 
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
 }
 
-function resolveSupplyListenTarget(autoSetup: any, log: any): { groupId: string; threadId: number | null } {
+function resolveSupplyListenTarget(autoSetup: any, log: any): { groupId: string; threadIds: number[]; threadId: number | null } {
+  const threadIds = Array.isArray(autoSetup.supplyListenThreadIds) && autoSetup.supplyListenThreadIds.length > 0
+    ? normalizeThreadIds(autoSetup.supplyListenThreadIds)
+    : autoSetup.supplyListenThreadId !== null && autoSetup.supplyListenThreadId !== undefined
+      ? normalizeThreadIds([autoSetup.supplyListenThreadId])
+      : log.selected_supplier_thread_id !== null && log.selected_supplier_thread_id !== undefined
+        ? normalizeThreadIds([log.selected_supplier_thread_id])
+        : autoSetup.supplyThreadId !== null && autoSetup.supplyThreadId !== undefined
+          ? normalizeThreadIds([autoSetup.supplyThreadId])
+          : [];
   return {
     groupId: autoSetup.supplyListenGroupId || log.selected_supplier_group_id || autoSetup.supplyGroupId || '',
-    threadId: autoSetup.supplyListenThreadId ?? log.selected_supplier_thread_id ?? autoSetup.supplyThreadId ?? null,
+    threadIds,
+    threadId: threadIds[0] ?? null,
   };
 }
 
