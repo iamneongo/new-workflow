@@ -405,6 +405,7 @@ export async function ensureDatabase(): Promise<void> {
         id SERIAL PRIMARY KEY,
         automation_id VARCHAR(100) NOT NULL,
         original_chat_id VARCHAR(100) NOT NULL,
+        original_thread_id INTEGER,
         original_msg_id INTEGER NOT NULL,
         original_text TEXT,
         original_media_label VARCHAR(100),
@@ -424,6 +425,7 @@ export async function ensureDatabase(): Promise<void> {
 
     const workflowLogAlterQueries = [
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supplier_selection_msg_id INTEGER',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS original_thread_id INTEGER',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supply_change_msg_id INTEGER',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supplier_route_id VARCHAR(100)',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS selected_supplier_group_id VARCHAR(100)',

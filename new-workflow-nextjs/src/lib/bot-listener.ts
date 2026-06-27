@@ -381,17 +381,17 @@ async function handleBotUpdate(update: any) {
           });
 
           const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
-          const isCtMessage = isSupplierRoutingMessage(log.original_text || '');
-          emitListenerLog('info', `Kiểm tra luồng CT: ${isCtMessage ? 'khớp' : 'không khớp'} - ${explainSupplierRoutingMatch(log.original_text || '')}`, {
+          const listenMatch = matchesSupplyListenScope(autoSetup, log);
+          emitListenerLog('info', `Kiểm tra kênh/topic lắng nghe: ${listenMatch.matched ? 'khớp' : 'không khớp'} - ${listenMatch.reason}`, {
             automationId: log.automation_id,
             step: 'supplier-select',
           });
 
-          if (isCtMessage && supplierRoutes.length > 0) {
+          if (listenMatch.matched && supplierRoutes.length > 0) {
             await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
 
             const selectionText = `🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`;
-            emitListenerLog('info', `CT message: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
+            emitListenerLog('info', `Kênh/topic lắng nghe khớp: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
@@ -415,18 +415,18 @@ async function handleBotUpdate(update: any) {
             return;
           }
 
-          if (isCtMessage) {
-            emitListenerLog('warn', 'Tin CT không có nhà cung ứng cấu hình hợp lệ, không thể mở nhánh supplier.', {
+          if (listenMatch.matched) {
+            emitListenerLog('warn', 'Tin ở kênh/topic lắng nghe không có nhà cung ứng cấu hình hợp lệ, không thể mở nhánh supplier.', {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await updateCallbackStatus('❌ Chưa cấu hình nhà cung ứng cho tin CT này.', 'callback missing supplier route');
+            await updateCallbackStatus('❌ Chưa cấu hình nhà cung ứng cho kênh/topic này.', 'callback missing supplier route');
           } else {
-            emitListenerLog('info', 'Tin nhắn không phải CT vật tư, dừng ở bước phê duyệt và không đi sang supplier.', {
+            emitListenerLog('info', 'Tin nhắn không nằm trong kênh/topic lắng nghe của Bước 3, dừng ở bước phê duyệt và không đi sang supplier.', {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await updateCallbackStatus(`ℹ️ Tin này không thuộc flow CT nên bot dừng ở bước phê duyệt.\n${explainSupplierRoutingMatch(log.original_text || '')}`, 'callback non-ct approval');
+            await updateCallbackStatus('ℹ️ Tin này không thuộc kênh/topic lắng nghe của Bước 3 nên bot dừng ở bước phê duyệt.', 'callback non-listen approval');
           }
           return;
 
@@ -478,11 +478,6 @@ async function handleBotUpdate(update: any) {
           const selectedRoute = supplierRoutes.find((route) => route.id === routeId);
           if (!selectedRoute) {
             await updateCallbackStatus('❌ Nhà cung ứng đã chọn không còn hợp lệ.', 'callback invalid supplier');
-            return;
-          }
-
-          if (!isSupplierRoutingMessage(log.original_text || '')) {
-            await updateCallbackStatus('⚠️ Nội dung gốc không phải CT vật tư nên bot không mở nhánh supplier.', 'callback non-ct supplier');
             return;
           }
 
@@ -1008,12 +1003,13 @@ async function handleBotMessageTrigger(
     emitListenerLog('info', 'Bot token sẵn sàng.', { automationId: listener.automationId, step: 'token' });
 
     const originalText = messageText;
+    const originalThreadId = normalizeThreadId(msg?.message_thread_id);
     console.log(`[BotListener] Trigger stage: writing workflow log for ${listener.automationId}`);
     emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
     const logRes = await p.query(
-      `INSERT INTO workflow_logs (automation_id, original_chat_id, original_msg_id, original_text, status)
-       VALUES ($1, $2, $3, $4, 'pending') RETURNING id`,
-      [listener.automationId, listener.sourceGroupId, sourceMessageId, originalText]
+      `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_text, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
+      [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, originalText]
     );
     const logId = logRes.rows[0].id;
     emitListenerLog('info', `Đã tạo workflow log #${logId}.`, { automationId: listener.automationId, step: 'db' });
@@ -1298,51 +1294,49 @@ function formatApprovalCustomMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
 }
 
-type SupplierRoutingMatch = {
-  isMatch: boolean;
-  reason: string;
-};
-
-function parseSupplierRoutingMessage(text: string): SupplierRoutingMatch {
-  const normalized = (text || '').replace(/\r\n/g, '\n').trim();
-  if (!normalized) {
-    return { isMatch: false, reason: 'Thiếu nội dung tin nhắn' };
-  }
-
-  const lines = normalized
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const firstLine = lines[0] || '';
-  if (!/^CT\s*:/i.test(firstLine)) {
-    return { isMatch: false, reason: 'Thiếu: CT ở đầu tin nhắn' };
-  }
-
-  const hasHmLine = lines.slice(1).some((line) => /^HM\s*:/i.test(line));
-  if (!hasHmLine) {
-    return { isMatch: false, reason: 'Thiếu dòng HM' };
-  }
-
-  const numberedItemCount = lines.slice(1).filter((line) => /^\d+\s*[.)]/.test(line)).length;
-  if (numberedItemCount === 0) {
-    return { isMatch: false, reason: 'Thiếu danh sách vật tư đánh số' };
-  }
-
-  return { isMatch: true, reason: 'Đủ điều kiện CT' };
-}
-
-function isSupplierRoutingMessage(text: string): boolean {
-  return parseSupplierRoutingMessage(text).isMatch;
-}
-
-function explainSupplierRoutingMatch(text: string): string {
-  return parseSupplierRoutingMessage(text).reason;
-}
-
 function normalizeComparableChatId(chatId: string | number | null | undefined): string {
   if (chatId === null || chatId === undefined) return '';
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
+}
+
+function resolveSupplyListenScope(autoSetup: any): { groupId: string; threadIds: number[] } {
+  const groupId = normalizeComparableChatId(autoSetup.supplyListenGroupId || '');
+  const threadIds = Array.from(new Set([
+    ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
+    autoSetup.supplyListenThreadId,
+    autoSetup.supplyThreadId,
+  ].map((item) => normalizeThreadId(item)).filter((item): item is number => item !== null)));
+
+  return { groupId, threadIds };
+}
+
+function matchesSupplyListenScope(autoSetup: any, log: any): { matched: boolean; reason: string } {
+  const scope = resolveSupplyListenScope(autoSetup);
+  const actualGroupId = normalizeComparableChatId(log.original_chat_id);
+  const actualThreadId = normalizeThreadId(log.original_thread_id);
+
+  if (scope.groupId && actualGroupId !== scope.groupId) {
+    return {
+      matched: false,
+      reason: `Tin gốc thuộc group ${actualGroupId || 'unknown'}, không khớp group lắng nghe ${scope.groupId}`,
+    };
+  }
+
+  if (scope.threadIds.length > 0) {
+    if (actualThreadId === null || !scope.threadIds.includes(actualThreadId)) {
+      return {
+        matched: false,
+        reason: `Tin gốc thuộc topic ${actualThreadId ?? 'general'}, không khớp topic lắng nghe ${scope.threadIds.join(', ')}`,
+      };
+    }
+  }
+
+  return {
+    matched: true,
+    reason: scope.groupId
+      ? `Khớp group ${scope.groupId}${scope.threadIds.length > 0 ? ` / topic ${scope.threadIds.join(', ')}` : ''}`
+      : 'Chưa cấu hình group/topic lắng nghe riêng, nhận theo scope mặc định',
+  };
 }
 
 function resolveSupplyListenTarget(autoSetup: any, log: any): {

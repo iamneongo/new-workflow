@@ -983,8 +983,8 @@ export default function ChatDetails({
     <div id="tour-supplier-routes-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nhà cung ứng cho CT:</label>
-          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Tin CT hợp lệ cần bắt đầu bằng <code>CT:</code>, có dòng <code>HM:</code> và ít nhất 1 dòng vật tư đánh số. Mỗi nhà cung ứng cũng có thể chọn topic riêng.</span>
+          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nhà cung ứng cho bước 3:</label>
+          <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>Hệ thống sẽ chuyển tiếp theo kênh/topic lắng nghe ở Bước 3, rồi mở danh sách nhà cung ứng tương ứng. Mỗi nhà cung ứng cũng có thể chọn topic riêng.</span>
         </div>
         <button
           id="tour-add-supplier-route"
@@ -1519,7 +1519,7 @@ export default function ChatDetails({
                         </div>
 
                         <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                          Nhánh CT: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}
+                          Nhánh lắng nghe: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}
                         </div>
                       </div>
                     )}
