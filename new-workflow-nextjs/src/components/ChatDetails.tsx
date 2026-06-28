@@ -30,6 +30,12 @@ interface ChatDetailsProps {
   onActiveNodeChange?: (node: WorkflowNodeKey | null) => void;
 }
 
+function assertAutomationSelected(value: AutomationSetup | null): asserts value is AutomationSetup {
+  if (!value) {
+    throw new Error('Automation is required');
+  }
+}
+
 function formatTime(ts: number | null): string {
   if (!ts) return 'Chưa có';
   const d = new Date(ts);
@@ -38,7 +44,7 @@ function formatTime(ts: number | null): string {
 }
 
 export default function ChatDetails({
-  automation,
+  automation: automationProp,
   onDeleteAutomation,
   onSaveAutomation,
   onRequestDeleteConfirm,
@@ -51,6 +57,7 @@ export default function ChatDetails({
   onListenerChange,
   onActiveNodeChange,
 }: ChatDetailsProps) {
+  const automation: any = automationProp;
 
   // Pan/zoom state for the workflow diagram
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +88,8 @@ export default function ChatDetails({
   const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
   const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
   const [approvalTopicConfigsInput, setApprovalTopicConfigsInput] = useState<ApprovalTopicConfig[]>([]);
+  const [isApprovalMessageDrawerOpen, setIsApprovalMessageDrawerOpen] = useState(false);
+  const [isApprovalTopicDrawerOpen, setIsApprovalTopicDrawerOpen] = useState(false);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
@@ -90,10 +99,13 @@ export default function ChatDetails({
   const [supplyChangeGroupIdInput, setSupplyChangeGroupIdInput] = useState('');
   const [supplyChangeThreadIdInput, setSupplyChangeThreadIdInput] = useState<number | ''>('');
   const [supplyChangeMessageModeInput, setSupplyChangeMessageModeInput] = useState<SupplyChangeMessageMode>('forward');
+  const [isSupplyConfigDrawerOpen, setIsSupplyConfigDrawerOpen] = useState(false);
+  const [isSupplyChangeDrawerOpen, setIsSupplyChangeDrawerOpen] = useState(false);
 
   const [deliveryGroupIdInput, setDeliveryGroupIdInput] = useState('');
   const [deliveryThreadIdInput, setDeliveryThreadIdInput] = useState<number | ''>('');
   const [finalMessageModeInput, setFinalMessageModeInput] = useState<FinalMessageMode>('forward');
+  const [isFinalConfigDrawerOpen, setIsFinalConfigDrawerOpen] = useState(false);
 
   const [finalGroupIdInput, setFinalGroupIdInput] = useState('');
   const [finalThreadIdInput, setFinalThreadIdInput] = useState<number | ''>('');
@@ -120,6 +132,22 @@ export default function ChatDetails({
     setOpenSelectorId(null);
   }, [editCard]);
 
+  useEffect(() => {
+    if (editCard !== 'approval') {
+      setIsApprovalMessageDrawerOpen(false);
+      setIsApprovalTopicDrawerOpen(false);
+    }
+    if (editCard !== 'supply') {
+      setIsSupplyConfigDrawerOpen(false);
+    }
+    if (editCard !== 'supplyChange') {
+      setIsSupplyChangeDrawerOpen(false);
+    }
+    if (editCard !== 'final') {
+      setIsFinalConfigDrawerOpen(false);
+    }
+  }, [editCard]);
+
   // Click outside to dismiss group selector dropdown
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -133,6 +161,36 @@ export default function ChatDetails({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [openSelectorId]);
+
+  useEffect(() => {
+    const hasOpenDrawer = (
+      isApprovalMessageDrawerOpen
+      || isApprovalTopicDrawerOpen
+      || isSupplyConfigDrawerOpen
+      || isSupplyChangeDrawerOpen
+      || isFinalConfigDrawerOpen
+    );
+    if (!hasOpenDrawer) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsApprovalMessageDrawerOpen(false);
+        setIsApprovalTopicDrawerOpen(false);
+        setIsSupplyConfigDrawerOpen(false);
+        setIsSupplyChangeDrawerOpen(false);
+        setIsFinalConfigDrawerOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isApprovalMessageDrawerOpen,
+    isApprovalTopicDrawerOpen,
+    isSupplyConfigDrawerOpen,
+    isSupplyChangeDrawerOpen,
+    isFinalConfigDrawerOpen,
+  ]);
 
 
   // Sync inputs with selected automation
@@ -449,6 +507,372 @@ export default function ChatDetails({
   }
 
   const chatList = Object.values(chats).sort((a, b) => a.chatTitle.localeCompare(b.chatTitle));
+  const approvalSourceGroupIdForEditor = sourceGroupIdInput || automation?.sourceGroupId || '';
+  const approvalTopicManagedCount = sourceThreadIdsInput.length;
+  const approvalTopicCustomCount = approvalTopicConfigsInput.filter((config) => (
+    sourceThreadIdsInput.includes(config.sourceThreadId)
+    && (
+      config.approvalCustomMessage !== DEFAULT_APPROVAL_CUSTOM_MESSAGE
+      || config.approvalActionConfig.agreeButtonLabel !== DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel
+      || config.approvalActionConfig.disagreeButtonLabel !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel
+      || config.approvalActionConfig.agreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage
+      || config.approvalActionConfig.disagreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage
+    )
+  )).length;
+
+  const setApprovalTopicConfig = (threadId: number, next: ApprovalTopicConfig) => {
+    setApprovalTopicConfigsInput((current) => {
+      const exists = current.findIndex((item) => item.sourceThreadId === threadId);
+      if (exists >= 0) {
+        const cloned = [...current];
+        cloned[exists] = next;
+        return cloned;
+      }
+      return [...current, next];
+    });
+  };
+
+  const renderApprovalTopicConfigCards = () => {
+    if (sourceThreadIdsInput.length === 0) {
+      return (
+        <div style={{ padding: '14px', fontSize: '12px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '10px', background: 'var(--bg-primary)', lineHeight: 1.5 }}>
+          Chọn ít nhất 1 topic nguồn ở Bước 1 để bật cấu hình riêng cho từng topic.
+        </div>
+      );
+    }
+
+    return sourceThreadIdsInput.map((threadId) => {
+      const topicEntry = approvalSourceGroupIdForEditor && chats[approvalSourceGroupIdForEditor]?.topics
+        ? Object.values(chats[approvalSourceGroupIdForEditor].topics).find((topic) => topic.threadId === threadId)
+        : null;
+      const configIndex = approvalTopicConfigsInput.findIndex((item) => item.sourceThreadId === threadId);
+      const config = configIndex >= 0
+        ? approvalTopicConfigsInput[configIndex]
+        : createDefaultApprovalTopicConfig(threadId);
+
+      return (
+        <div key={threadId} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Topic nguồn:</span>
+              {topicEntry ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <span>{topicEntry.topicIcon || '💬'}</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>{topicEntry.topicName}</span>
+                </span>
+              ) : (
+                <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>Topic #{threadId}</span>
+              )}
+            </div>
+            <span style={{ fontSize: '10px', color: configIndex >= 0 ? 'var(--accent-blue)' : 'var(--color-text-muted)', fontWeight: 600 }}>
+              {configIndex >= 0 ? 'Đang chỉnh riêng' : 'Đang dùng mẫu mặc định'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Lời nhắn riêng:</label>
+            <textarea
+              rows={3}
+              value={config.approvalCustomMessage}
+              onChange={(e) => setApprovalTopicConfig(threadId, {
+                ...config,
+                approvalCustomMessage: e.target.value,
+              })}
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút đồng ý:</label>
+              <input
+                value={config.approvalActionConfig.agreeButtonLabel}
+                onChange={(e) => setApprovalTopicConfig(threadId, {
+                  ...config,
+                  approvalActionConfig: {
+                    ...config.approvalActionConfig,
+                    agreeButtonLabel: e.target.value,
+                  },
+                })}
+                style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút không đồng ý:</label>
+              <input
+                value={config.approvalActionConfig.disagreeButtonLabel}
+                onChange={(e) => setApprovalTopicConfig(threadId, {
+                  ...config,
+                  approvalActionConfig: {
+                    ...config.approvalActionConfig,
+                    disagreeButtonLabel: e.target.value,
+                  },
+                })}
+                style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Sau khi đồng ý:</label>
+              <textarea
+                rows={2}
+                value={config.approvalActionConfig.agreeResultMessage}
+                onChange={(e) => setApprovalTopicConfig(threadId, {
+                  ...config,
+                  approvalActionConfig: {
+                    ...config.approvalActionConfig,
+                    agreeResultMessage: e.target.value,
+                  },
+                })}
+                style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Sau khi không đồng ý:</label>
+              <textarea
+                rows={2}
+                value={config.approvalActionConfig.disagreeResultMessage}
+                onChange={(e) => setApprovalTopicConfig(threadId, {
+                  ...config,
+                  approvalActionConfig: {
+                    ...config.approvalActionConfig,
+                    disagreeResultMessage: e.target.value,
+                  },
+                })}
+                style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    });
+  };
+
+  const renderDrawerShell = (
+    isOpen: boolean,
+    title: string,
+    subtitle: string,
+    onClose: () => void,
+    content: React.ReactNode,
+    footerNote: string,
+    footerActionLabel = 'Xong'
+  ) => {
+    if (!isOpen) return null;
+
+    return (
+      <div
+        data-no-pan="true"
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 40,
+          background: 'rgba(15, 23, 42, 0.32)',
+          display: 'flex',
+          justifyContent: 'flex-end',
+        }}
+      >
+        <div
+          data-no-pan="true"
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: 'min(680px, 96vw)',
+            height: '100%',
+            background: 'var(--bg-secondary)',
+            borderLeft: '1px solid var(--border-color)',
+            boxShadow: '-18px 0 48px rgba(15, 23, 42, 0.18)',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'approvalTopicDrawerIn 0.18s ease-out',
+          }}
+        >
+          <div style={{ padding: '18px 18px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <strong style={{ fontSize: '16px', color: 'var(--color-text)' }}>{title}</strong>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
+                {subtitle}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onClose}
+              style={{ padding: '6px 10px', fontSize: '11px', borderRadius: '999px', whiteSpace: 'nowrap' }}
+            >
+              Đóng
+            </button>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {content}
+          </div>
+
+          <div style={{ padding: '14px 18px 18px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+              {footerNote}
+            </span>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onClose}
+              style={{ padding: '8px 12px', fontSize: '11px', borderRadius: '999px' }}
+            >
+              {footerActionLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const approvalMessageConfigPanel = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách bot gửi tin gốc</label>
+        <select
+          value={approvalMessageModeInput}
+          onChange={(e) => setApprovalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+        >
+          <option value="forward">Gửi nguyên tin rồi thêm lời nhắn</option>
+          <option value="copy">Sao chép tin rồi thêm lời nhắn</option>
+        </select>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Lời nhắn mở đầu</label>
+        <textarea
+          value={approvalCustomMessageInput}
+          onChange={(e) => setApprovalCustomMessageInput(e.target.value)}
+          rows={4}
+          placeholder={DEFAULT_APPROVAL_CUSTOM_MESSAGE}
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', minHeight: '96px', lineHeight: 1.45 }}
+        />
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          Bạn viết 1 đoạn ngắn để người duyệt hiểu họ cần đọc gì và bấm nút nào.
+        </span>
+      </div>
+
+      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Tên nút và câu trả lời sau khi duyệt</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút đồng ý</label>
+            <input
+              value={approvalAgreeButtonLabelInput}
+              onChange={(e) => setApprovalAgreeButtonLabelInput(e.target.value)}
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nút không đồng ý</label>
+            <input
+              value={approvalDisagreeButtonLabelInput}
+              onChange={(e) => setApprovalDisagreeButtonLabelInput(e.target.value)}
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Câu trả lời sau khi đồng ý</label>
+          <textarea
+            value={approvalAgreeResultMessageInput}
+            onChange={(e) => setApprovalAgreeResultMessageInput(e.target.value)}
+            rows={2}
+            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Câu trả lời sau khi không đồng ý</label>
+          <textarea
+            value={approvalDisagreeResultMessageInput}
+            onChange={(e) => setApprovalDisagreeResultMessageInput(e.target.value)}
+            rows={2}
+            style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+          />
+        </div>
+      </div>
+
+      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Xem trước</span>
+        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5, color: 'var(--color-text)', fontSize: '12px' }}>
+          {approvalCustomMessageInput || DEFAULT_APPROVAL_CUSTOM_MESSAGE}
+          {'\n\n'}
+          {approvalAgreeResultMessageInput || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage}
+        </div>
+      </div>
+    </div>
+  );
+
+  function renderSupplyConfigPanel() {
+    return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Danh sách nhà cung ứng</strong>
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          Bạn thêm từng nhà cung ứng, chọn nhóm nhận và chọn cách bot gửi tin.
+        </span>
+      </div>
+      {renderSupplierRoutesEditor()}
+      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nhóm bot sẽ theo dõi ở bước 3</strong>
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          Bạn chọn nơi bot lắng nghe phản hồi để mở đúng danh sách nhà cung ứng.
+        </span>
+        {renderGroupTopicSelector(
+          supplyListenGroupIdInput,
+          setSupplyListenGroupIdInput,
+          supplyListenThreadIdsInput,
+          setSupplyListenThreadIdsInput,
+          () => {},
+          () => {},
+          undefined,
+          { hideActions: true, selectorId: 'supply-listen-drawer', topicLabel: 'Chọn topic bot sẽ theo dõi:' }
+        )}
+      </div>
+    </div>
+    );
+  }
+
+  const supplyChangeConfigPanel = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách bot gửi phản hồi đổi vật tư</label>
+        <select
+          value={supplyChangeMessageModeInput}
+          onChange={(e) => setSupplyChangeMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+        >
+          <option value="forward">Gửi nguyên phản hồi rồi báo đổi vật tư</option>
+          <option value="copy">Sao chép phản hồi rồi báo đổi vật tư</option>
+        </select>
+      </div>
+      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+        Khi nhà cung ứng bấm yêu cầu đổi, bot sẽ gửi 1 tin báo vào nhóm bạn chọn. Sau đó bot sẽ chuyển tiếp các phản hồi theo cách bạn đặt ở đây.
+      </div>
+    </div>
+  );
+
+  const finalConfigPanel = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách bot gửi tin ở bước nghiệm thu</label>
+        <select
+          value={finalMessageModeInput}
+          onChange={(e) => setFinalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
+        >
+          <option value="forward">Gửi nguyên tin rồi thêm phần tổng hợp</option>
+          <option value="copy">Sao chép tin rồi thêm phần tổng hợp</option>
+        </select>
+      </div>
+      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+        Bạn dùng phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
+      </div>
+    </div>
+  );
 
   const renderSourceGroupTopicBadge = (groupId: string, threadIds: number[]) => {
     const chat = chats[groupId];
@@ -1006,6 +1430,7 @@ export default function ChatDetails({
       </div>
     );
   }
+  assertAutomationSelected(automation);
 
   // ---------------------------------------------------------------------------
   // Render Interactive Configuration Mode (When an automation is selected)
@@ -1027,7 +1452,8 @@ export default function ChatDetails({
     automation.sourceGroupId
   );
 
-  const supplierRoutesEditor = (
+  function renderSupplierRoutesEditor() {
+    return (
     <div id="tour-supplier-routes-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -1111,6 +1537,7 @@ export default function ChatDetails({
       )}
     </div>
   );
+  }
 
   return (
     <div className="chat-details-view" id="chatDetailsView" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1139,6 +1566,16 @@ export default function ChatDetails({
           cursor: default !important;
           transform: none !important;
           box-shadow: 0 4px 16px rgba(34, 158, 217, 0.08) !important;
+        }
+        @keyframes approvalTopicDrawerIn {
+          from {
+            transform: translateX(28px);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
         }
         .workflow-diagram-container {
           user-select: none;
@@ -1213,7 +1650,7 @@ export default function ChatDetails({
                 title: 'Xóa automation này?',
                 message: 'Toàn bộ cấu hình của workflow hiện tại sẽ bị xóa. Thao tác này không thể hoàn tác.',
                 confirmText: 'Xóa',
-                onConfirm: () => onDeleteAutomation(automation.id),
+                onConfirm: () => onDeleteAutomation(automation!.id),
               });
             }}
             style={{ 
@@ -1373,6 +1810,30 @@ export default function ChatDetails({
                     () => setEditCard(null),
                     () => handleSaveCard('approval'),
                     <div id="tour-approval-extra-controls" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsApprovalMessageDrawerOpen(true);
+                        }}
+                        style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
+                      >
+                        Mở phần tin nhắn
+                      </button>
+                      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Tin nhắn bước duyệt</strong>
+                          <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
+                            {approvalMessageModeInput === 'copy' ? 'Đang sao chép tin' : 'Đang gửi nguyên tin'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                          Bạn mở phần này để sửa lời nhắn, đổi tên nút và đổi câu trả lời sau khi duyệt.
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'none' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách gửi nội dung gốc:</label>
                         <select
@@ -1473,8 +1934,91 @@ export default function ChatDetails({
                           </div>
                         </div>
                       </div>
+                      </div>
 
                       <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
+                              Cấu hình riêng theo từng topic nguồn
+                            </div>
+                            <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                              Mỗi topic nguồn có thể có lời nhắn, nút và nội dung sau khi duyệt riêng. Bạn bấm vào phần chi tiết để xem và sửa từng topic.
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsApprovalTopicDrawerOpen(true);
+                            }}
+                            style={{ padding: '6px 10px', fontSize: '10px', borderRadius: '999px', whiteSpace: 'nowrap' }}
+                          >
+                            Mở phần chi tiết
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsApprovalTopicDrawerOpen(true);
+                          }}
+                          style={{
+                            width: '100%',
+                            textAlign: 'left',
+                            background: 'var(--bg-primary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '10px',
+                            padding: '12px',
+                            color: 'var(--color-text)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                            <strong style={{ fontSize: '12px' }}>Chi tiết từng topic</strong>
+                            <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
+                              {approvalTopicManagedCount > 0 ? `${approvalTopicManagedCount} topic` : 'Chưa có topic'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                            {approvalTopicManagedCount > 0
+                              ? (approvalTopicCustomCount > 0
+                                ? `${approvalTopicCustomCount} topic đang có cấu hình riêng, các topic còn lại dùng cấu hình mặc định của bước 2.`
+                                : 'Tất cả topic hiện đang dùng cấu hình mặc định của bước 2.')
+                              : 'Hãy chọn topic nguồn ở Bước 1 trước, rồi mở phần chi tiết để chỉnh từng topic.'}
+                          </div>
+                          {approvalTopicManagedCount > 0 && (
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {sourceThreadIdsInput.slice(0, 4).map((threadId) => {
+                                const topicEntry = approvalSourceGroupIdForEditor && chats[approvalSourceGroupIdForEditor]?.topics
+                                  ? Object.values(chats[approvalSourceGroupIdForEditor].topics).find((topic) => topic.threadId === threadId)
+                                  : null;
+
+                                return (
+                                  <span
+                                    key={threadId}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(59, 130, 246, 0.08)', padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(59, 130, 246, 0.18)', fontSize: '10px', color: 'var(--color-text)' }}
+                                  >
+                                    <span>{topicEntry?.topicIcon || '💬'}</span>
+                                    <span>{topicEntry?.topicName || `Topic #${threadId}`}</span>
+                                  </span>
+                                );
+                              })}
+                              {sourceThreadIdsInput.length > 4 && (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 8px', borderRadius: '999px', border: '1px solid var(--border-color)', fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                                  +{sourceThreadIdsInput.length - 4} topic
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </button>
+
+                        <div style={{ display: 'none' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
                             Cấu hình riêng theo từng topic nguồn
@@ -1608,6 +2152,7 @@ export default function ChatDetails({
                             Chọn ít nhất 1 topic nguồn ở Bước 1 để bật cấu hình riêng cho từng topic.
                           </div>
                         )}
+                        </div>
                       </div>
                     </div>,
                     { selectorId: 'approval' }
@@ -1635,7 +2180,7 @@ export default function ChatDetails({
                         Cấu hình riêng theo topic: {automation.approvalTopicConfigs.length} topic
                       </div>
                       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                        {automation.approvalTopicConfigs.map((cfg) => {
+                        {automation.approvalTopicConfigs.map((cfg: any) => {
                           const topicEntry = automation.sourceGroupId && chats[automation.sourceGroupId]?.topics
                             ? Object.values(chats[automation.sourceGroupId].topics).find((topic) => topic.threadId === cfg.sourceThreadId)
                             : null;
@@ -1752,9 +2297,32 @@ export default function ChatDetails({
                           setSupplyThreadIdInput,
                           () => setEditCard(null),
                           () => handleSaveCard('supply'),
-                          supplierRoutesEditor,
+                          undefined,
                           { selectorId: 'supply' }
                         )}
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsSupplyConfigDrawerOpen(true);
+                          }}
+                          style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
+                        >
+                          Mở phần gửi tin
+                        </button>
+                        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                            <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nhà cung ứng và nhóm bot theo dõi</strong>
+                            <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
+                              {supplierRoutesInput.length > 0 ? `${supplierRoutesInput.length} nhà cung ứng` : 'Chưa có nhà cung ứng'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                            Bạn mở phần này để thêm nhà cung ứng, chọn cách bot gửi tin và chọn nhóm bot sẽ theo dõi ở bước 3.
+                          </div>
+                        </div>
+                        <div style={{ display: 'none' }}>
                         <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
                           <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600', marginBottom: '4px' }}>
                             Cài đặt kênh lắng nghe
@@ -1769,6 +2337,7 @@ export default function ChatDetails({
                             undefined,
                             { selectorId: 'supply-listen', topicLabel: 'Chọn topic lắng nghe:' }
                           )}
+                        </div>
                         </div>
                       </div>
                     ) : (
@@ -1844,6 +2413,24 @@ export default function ChatDetails({
                                 () => setEditCard(null),
                                 () => handleSaveCard('supplyChange'),
                                 <div id="tour-supply-change-extra-controls" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsSupplyChangeDrawerOpen(true);
+                                    }}
+                                    style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
+                                  >
+                                    Mở phần gửi tin
+                                  </button>
+                                  <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Tin nhắn khi nhà cung ứng xin đổi vật tư</strong>
+                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                                      Bạn mở phần này để chọn cách bot gửi lại phản hồi đổi vật tư.
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'none' }}>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách chuyển phản hồi thay đổi:</label>
                                   <select
@@ -1858,6 +2445,7 @@ export default function ChatDetails({
                                   </div>
                                   <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
                                     Khi nhà cung ứng bấm yêu cầu thay đổi, bot sẽ gửi thông báo vào nhóm này. Sau đó, mọi reply vào tin nhắn đó sẽ được chuyển theo cách bạn chọn.
+                                  </div>
                                   </div>
                                 </div>,
                                 { selectorId: 'supply-change' }
@@ -1957,6 +2545,24 @@ export default function ChatDetails({
                                 () => setEditCard(null),
                                 () => handleSaveCard('final'),
                                 <div id="tour-final-extra-controls" style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsFinalConfigDrawerOpen(true);
+                                    }}
+                                    style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
+                                  >
+                                    Mở phần gửi tin
+                                  </button>
+                                  <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Tin nhắn bước nghiệm thu</strong>
+                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                                      Bạn mở phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'none' }}>
                                   <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách gửi phản hồi cuối:</label>
                                   <select
                                     id="tour-final-message-mode"
@@ -1967,6 +2573,7 @@ export default function ChatDetails({
                                     <option value="forward">Gửi nguyên tin + lời nhắn tổng hợp</option>
                                     <option value="copy">Sao chép tin + lời nhắn tổng hợp</option>
                                   </select>
+                                  </div>
                                 </div>,
                                 { selectorId: 'final' }
                               )}
@@ -2012,6 +2619,116 @@ export default function ChatDetails({
         </div>
         </div>
       </div>
+
+      {renderDrawerShell(
+        isApprovalMessageDrawerOpen && editCard === 'approval',
+        'Tin nhắn bước duyệt',
+        'Bạn chọn cách bot gửi tin, sửa lời nhắn mở đầu, đổi tên nút và đổi câu trả lời sau khi duyệt.',
+        () => setIsApprovalMessageDrawerOpen(false),
+        approvalMessageConfigPanel,
+        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 2.'
+      )}
+
+      {renderDrawerShell(
+        isSupplyConfigDrawerOpen && editCard === 'supply',
+        'Nhà cung ứng và nhóm bot theo dõi',
+        'Bạn thêm nhà cung ứng, chọn nơi nhận và chọn nơi bot sẽ theo dõi phản hồi ở bước 3.',
+        () => setIsSupplyConfigDrawerOpen(false),
+        renderSupplyConfigPanel(),
+        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 3.'
+      )}
+
+      {renderDrawerShell(
+        isSupplyChangeDrawerOpen && editCard === 'supplyChange',
+        'Tin nhắn khi xin đổi vật tư',
+        'Bạn chọn cách bot gửi lại phản hồi đổi vật tư.',
+        () => setIsSupplyChangeDrawerOpen(false),
+        supplyChangeConfigPanel,
+        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở node này.'
+      )}
+
+      {renderDrawerShell(
+        isFinalConfigDrawerOpen && editCard === 'final',
+        'Tin nhắn bước nghiệm thu',
+        'Bạn chọn cách bot gửi tin cuối sang nhóm nghiệm thu.',
+        () => setIsFinalConfigDrawerOpen(false),
+        finalConfigPanel,
+        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 5.'
+      )}
+
+      {isApprovalTopicDrawerOpen && editCard === 'approval' && (
+        <div
+          data-no-pan="true"
+          onClick={() => setIsApprovalTopicDrawerOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 40,
+            background: 'rgba(15, 23, 42, 0.32)',
+            display: 'flex',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <div
+            data-no-pan="true"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(680px, 96vw)',
+              height: '100%',
+              background: 'var(--bg-secondary)',
+              borderLeft: '1px solid var(--border-color)',
+              boxShadow: '-18px 0 48px rgba(15, 23, 42, 0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              animation: 'approvalTopicDrawerIn 0.18s ease-out',
+            }}
+          >
+            <div style={{ padding: '18px 18px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <strong style={{ fontSize: '16px', color: 'var(--color-text)' }}>Cấu hình riêng theo topic nguồn</strong>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
+                  Chỉnh từng topic ở đây để bước 2 gọn và dễ nhìn hơn. Các thay đổi chỉ được áp dụng khi bạn bấm Lưu ở bước 2.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsApprovalTopicDrawerOpen(false)}
+                style={{ padding: '6px 10px', fontSize: '11px', borderRadius: '999px', whiteSpace: 'nowrap' }}
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: '999px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.18)', fontSize: '11px', color: 'var(--color-text)' }}>
+                {approvalTopicManagedCount} topic đang quản lý
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: '999px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.18)', fontSize: '11px', color: 'var(--color-text)' }}>
+                {approvalTopicCustomCount} topic có cấu hình riêng
+              </span>
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {renderApprovalTopicConfigCards()}
+            </div>
+
+            <div style={{ padding: '14px 18px 18px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                Mẹo: chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 2 để bot dùng cấu hình mới.
+              </span>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setIsApprovalTopicDrawerOpen(false)}
+                style={{ padding: '8px 12px', fontSize: '11px', borderRadius: '999px' }}
+              >
+                Xong
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
-}
+    );
+  }

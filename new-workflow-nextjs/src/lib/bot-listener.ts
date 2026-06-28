@@ -653,7 +653,7 @@ async function handleBotUpdate(update: any) {
           await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
-        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.\n👉 *YÊU CẦU:* Khi nhận được vật tư, vui lòng *REPLY* trực tiếp vào tin nhắn này để nghiệm thu.`;
+        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`;
         const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: autoSetup.deliveryGroupId,
           message_thread_id: autoSetup.deliveryThreadId || undefined,
@@ -724,7 +724,7 @@ async function handleBotUpdate(update: any) {
           });
         }
         const rejectText = isChange
-          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 *Hãy REPLY trực tiếp vào tin nhắn này.* Bot sẽ chuyển nội dung phản hồi sang group/topic đã cấu hình để mọi người cùng biết nhà cung ứng muốn thay đổi gì.`
+          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`
           : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
@@ -740,24 +740,22 @@ async function handleBotUpdate(update: any) {
       }
     }
 
-    // 2. New message trigger handler
-    if (update.message) {
-      await handleBotMessageTrigger(update.message, p, token);
-    }
+    let replyHandled = false;
 
     // 3. Reply to delivery message handler
     if (update.message && update.message.reply_to_message) {
       const msg = update.message;
       const replyToMsgId = msg.reply_to_message.message_id;
       const chatId = msg.chat.id.toString();
+      const replyThreadId = normalizeThreadId(msg.message_thread_id);
 
       emitListenerLog('info', `Nhận reply trong group ${chatId} tới message #${replyToMsgId}.`, {
         step: 'delivery-reply',
       });
 
-      // Find log waiting for delivery reply
+      // Find log waiting for delivery reply or reply to the original request in step 3
       const logRes = await p.query(
-        "SELECT * FROM workflow_logs WHERE delivery_msg_id = $1 AND status = 'supply_agreed'",
+        "SELECT * FROM workflow_logs WHERE status IN ('supply_agreed', 'completed') AND (delivery_msg_id = $1 OR original_msg_id = $1)",
         [replyToMsgId]
       );
       if (logRes.rows.length > 0) {
@@ -768,7 +766,17 @@ async function handleBotUpdate(update: any) {
           // Verify chat ID
           const normLogGroup = normalizeComparableChatId(log.delivery_group_id || autoSetup.deliveryGroupId);
           const normChatId = normalizeComparableChatId(chatId);
-          if (normLogGroup !== normChatId) {
+          const isStep3OriginReply = Number(log.original_msg_id) === Number(replyToMsgId);
+          if (isStep3OriginReply) {
+            const step3ReplyScope = matchesSupplyListenReplyScope(chatId, replyThreadId, autoSetup, log);
+            if (!step3ReplyScope.matched) {
+              emitListenerLog('warn', `Bá» qua reply nghiá»‡m thu á»Ÿ bÆ°á»›c 3: ${step3ReplyScope.reason}.`, {
+                automationId: log.automation_id,
+                step: 'delivery-reply',
+              });
+              continue;
+            }
+          } else if (normLogGroup !== normChatId) {
             emitListenerLog('warn', `Bỏ qua reply delivery do chat không khớp. Reply chat=${chatId}, config=${autoSetup.deliveryGroupId}.`, {
               automationId: log.automation_id,
               step: 'delivery-reply',
@@ -776,7 +784,10 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          await p.query("UPDATE workflow_logs SET status = 'completed' WHERE id = $1", [log.id]);
+          if (log.status !== 'completed') {
+            await p.query("UPDATE workflow_logs SET status = 'completed' WHERE id = $1", [log.id]);
+          }
+          replyHandled = true;
 
           const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
           const replyText = msg.text || '';
@@ -796,7 +807,7 @@ async function handleBotUpdate(update: any) {
             text: '✅ Bot đã nhận phản hồi nghiệm thu và đang chuyển đến nhóm tổng hợp.',
           }, 'delivery reply ack');
 
-          const finalHeader = `✅ *NGHIỆM THU VẬT TƯ HOÀN TẤT*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được nghiệm thu thành công bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
+          const finalHeader = `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
@@ -838,38 +849,9 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          const sourceGroupIds = Array.from(new Set([
-            autoSetup.supplyListenGroupId,
-            autoSetup.supplyChangeGroupId,
-            log.selected_supplier_group_id,
-            autoSetup.supplyGroupId,
-          ].map((item) => normalizeComparableChatId(item)).filter(Boolean)));
-          const sourceGroupId = sourceGroupIds[0] || '';
-          if (!sourceGroupId) {
-            emitListenerLog('warn', `Không có group nguồn để relay reply thay đổi cho automation ${log.automation_id}.`, {
-              automationId: log.automation_id,
-              step: 'supply-change-reply',
-            });
-            continue;
-          }
-
-          const expectedThreadIds = Array.from(new Set([
-            ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
-            autoSetup.supplyListenThreadId,
-            autoSetup.supplyChangeThreadId,
-            log.selected_supplier_thread_id,
-            autoSetup.supplyThreadId,
-          ].map((item) => normalizeThreadId(item)).filter((item): item is number => item !== null)));
-          const normChatId = normalizeComparableChatId(chatId);
-          if (!sourceGroupIds.includes(normChatId)) {
-            emitListenerLog('warn', `Bỏ qua reply change do chat không khớp. Reply chat=${chatId}, config=${sourceGroupIds.join(', ')}.`, {
-              automationId: log.automation_id,
-              step: 'supply-change-reply',
-            });
-            continue;
-          }
-          if (expectedThreadIds.length > 0 && (replyThreadId === null || !expectedThreadIds.includes(replyThreadId))) {
-            emitListenerLog('warn', `Bỏ qua reply change do topic không khớp. Reply topic=${replyThreadId ?? 'general'}, config=${expectedThreadIds.join(', ')}.`, {
+          const supplyChangeReplyScope = matchesSupplyChangeReplyScope(chatId, replyThreadId, autoSetup, log);
+          if (!supplyChangeReplyScope.matched) {
+            emitListenerLog('warn', `Bỏ qua reply change: ${supplyChangeReplyScope.reason}.`, {
               automationId: log.automation_id,
               step: 'supply-change-reply',
             });
@@ -879,13 +861,19 @@ async function handleBotUpdate(update: any) {
           const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
           const replyText = msg.text || msg.caption || '';
           const relayHeader = `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Người phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới được bot chuyển tiếp từ tin nhắn reply.`;
+          const originalSenderName = typeof log.original_sender_name === 'string' && log.original_sender_name.trim()
+            ? log.original_sender_name.trim()
+            : 'Kh\u00f4ng r\u00f5';
+          const originalRequestText = log.original_text || '[Media]';
+          const enrichedRelayHeader = `\ud83d\udd04 *NH\u00c0 CUNG \u1ee8NG Y\u00caU C\u1ea6U THAY \u0110\u1ed4I V\u1eacT T\u01af*\n\n*Y\u00eau c\u1ea7u ban \u0111\u1ea7u t\u1eeb:* ${originalSenderName}\n*N\u1ed9i dung y\u00eau c\u1ea7u ban \u0111\u1ea7u:* ${originalRequestText}\n\n*Ng\u01b0\u1eddi \u0111ang ph\u1ea3n h\u1ed3i:* ${senderFullName}\n*N\u1ed9i dung ph\u1ea3n h\u1ed3i:* ${replyText || '[Media]'}\n\nN\u1ed9i dung chi ti\u1ebft b\u00ean d\u01b0\u1edbi l\u00e0 tin reply g\u1ed1c \u0111\u01b0\u1ee3c bot chuy\u1ec3n ti\u1ebfp l\u1ea1i.`;
           const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
+          replyHandled = true;
 
           const relayData = await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: targetGroupId,
             message_thread_id: relayThreadId,
-            text: relayHeader,
+            text: enrichedRelayHeader,
           }, 'supply change relay header');
 
           if (relayData.ok) {
@@ -898,6 +886,49 @@ async function handleBotUpdate(update: any) {
           }
         }
       }
+    }
+
+    if (update.message && update.message.reply_to_message && !replyHandled) {
+      const msg = update.message;
+      const replyToMsgId = msg.reply_to_message.message_id;
+      const chatId = msg.chat.id.toString();
+      const replyThreadId = normalizeThreadId(msg.message_thread_id);
+      const existingReplyRes = await p.query(
+        "SELECT * FROM workflow_logs WHERE original_msg_id = $1 OR delivery_msg_id = $1 OR supply_change_msg_id = $1",
+        [replyToMsgId]
+      );
+
+      for (const log of existingReplyRes.rows) {
+        const autoSetup = await loadAutomationSetup(log.automation_id);
+        if (!autoSetup) continue;
+
+        const isOriginalReply = Number(log.original_msg_id) === Number(replyToMsgId);
+        const isDeliveryReply = Number(log.delivery_msg_id) === Number(replyToMsgId);
+        const isSupplyChangeReply = Number(log.supply_change_msg_id) === Number(replyToMsgId);
+
+        const matchesOriginalReply = isOriginalReply
+          && matchesSupplyListenReplyScope(chatId, replyThreadId, autoSetup, log).matched;
+        const matchesDeliveryReply = isDeliveryReply
+          && matchesDeliveryReplyScope(chatId, autoSetup, log);
+        const matchesChangeReply = isSupplyChangeReply
+          && matchesSupplyChangeReplyScope(chatId, replyThreadId, autoSetup, log).matched;
+
+        if (!matchesOriginalReply && !matchesDeliveryReply && !matchesChangeReply) {
+          continue;
+        }
+
+        replyHandled = true;
+        emitListenerLog('info', `Bỏ qua reply lặp cho workflow #${log.id} đang ở trạng thái ${log.status}.`, {
+          automationId: log.automation_id,
+          step: 'reply-filter',
+        });
+        break;
+      }
+    }
+
+    // 2. New message trigger handler
+    if (update.message && !replyHandled) {
+      await handleBotMessageTrigger(update.message, p, token);
     }
   } catch (err: any) {
     console.error('[BotListener] Error handling bot update:', err.message);
@@ -1021,6 +1052,10 @@ async function handleBotMessageTrigger(
         || msg?.sender_chat?.title
         || 'Unknown';
     } catch {}
+    await p.query(
+      'UPDATE workflow_logs SET original_sender_name = $1 WHERE id = $2',
+      [senderName, logId]
+    );
 
     if (!listener.approvalGroupId) {
       console.warn(`[BotListener] Approval group is not configured for automation: ${listener.automationId}. Skipping message forward.`);
@@ -1401,6 +1436,98 @@ function matchesSupplyListenScope(autoSetup: any, log: any): { matched: boolean;
     reason: scope.groupId
       ? `Khớp group ${scope.groupId}${scope.threadIds.length > 0 ? ` / topic ${scope.threadIds.join(', ')}` : ''}`
       : 'Chưa cấu hình group/topic lắng nghe riêng, nhận theo scope mặc định',
+  };
+}
+
+function matchesSupplyListenReplyScope(
+  actualChatId: string | number | null | undefined,
+  actualThreadId: number | null,
+  autoSetup: any,
+  log: any
+): { matched: boolean; reason: string } {
+  const scope = resolveSupplyListenScope(autoSetup);
+  const expectedGroupId = scope.groupId || normalizeComparableChatId(log.original_chat_id);
+  const normalizedActualChatId = normalizeComparableChatId(actualChatId);
+
+  if (expectedGroupId && normalizedActualChatId !== expectedGroupId) {
+    return {
+      matched: false,
+      reason: `Reply chat=${normalizedActualChatId || 'unknown'} khÃ´ng khá»›p group theo dÃµi ${expectedGroupId}`,
+    };
+  }
+
+  if (scope.threadIds.length > 0) {
+    if (actualThreadId === null || !scope.threadIds.includes(actualThreadId)) {
+      return {
+        matched: false,
+        reason: `Reply topic=${actualThreadId ?? 'general'} khÃ´ng khá»›p danh sÃ¡ch topic theo dÃµi ${scope.threadIds.join(', ')}`,
+      };
+    }
+  }
+
+  return {
+    matched: true,
+    reason: expectedGroupId
+      ? `Khá»›p group ${expectedGroupId}${scope.threadIds.length > 0 ? ` / topic ${scope.threadIds.join(', ')}` : ' / táº¥t cáº£ topic'}`
+      : 'Khá»›p pháº¡m vi nghe reply máº·c Ä‘á»‹nh',
+  };
+}
+
+function matchesDeliveryReplyScope(
+  actualChatId: string | number | null | undefined,
+  autoSetup: any,
+  log: any
+): boolean {
+  const expectedGroupId = normalizeComparableChatId(log.delivery_group_id || autoSetup.deliveryGroupId);
+  const normalizedActualChatId = normalizeComparableChatId(actualChatId);
+  return !!expectedGroupId && normalizedActualChatId === expectedGroupId;
+}
+
+function matchesSupplyChangeReplyScope(
+  actualChatId: string | number | null | undefined,
+  actualThreadId: number | null,
+  autoSetup: any,
+  log: any
+): { matched: boolean; reason: string } {
+  const sourceGroupIds = Array.from(new Set([
+    autoSetup.supplyListenGroupId,
+    autoSetup.supplyChangeGroupId,
+    log.selected_supplier_group_id,
+    autoSetup.supplyGroupId,
+  ].map((item) => normalizeComparableChatId(item)).filter(Boolean)));
+  const expectedThreadIds = Array.from(new Set([
+    ...(Array.isArray(autoSetup.supplyListenThreadIds) ? normalizeThreadIds(autoSetup.supplyListenThreadIds) : []),
+    autoSetup.supplyListenThreadId,
+    autoSetup.supplyChangeThreadId,
+    log.selected_supplier_thread_id,
+    autoSetup.supplyThreadId,
+  ].map((item) => normalizeThreadId(item)).filter((item): item is number => item !== null)));
+  const normalizedActualChatId = normalizeComparableChatId(actualChatId);
+
+  if (sourceGroupIds.length === 0) {
+    return {
+      matched: false,
+      reason: 'không có group nguồn để nhận reply thay đổi',
+    };
+  }
+
+  if (!sourceGroupIds.includes(normalizedActualChatId)) {
+    return {
+      matched: false,
+      reason: `chat không khớp, nhận ${normalizedActualChatId || 'unknown'}, cấu hình ${sourceGroupIds.join(', ')}`,
+    };
+  }
+
+  if (expectedThreadIds.length > 0 && (actualThreadId === null || !expectedThreadIds.includes(actualThreadId))) {
+    return {
+      matched: false,
+      reason: `topic không khớp, nhận ${actualThreadId ?? 'general'}, cấu hình ${expectedThreadIds.join(', ')}`,
+    };
+  }
+
+  return {
+    matched: true,
+    reason: 'khớp phạm vi reply thay đổi',
   };
 }
 
