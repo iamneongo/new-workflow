@@ -8,6 +8,7 @@ export interface ApprovalActionConfig {
   disagreeButtonLabel: string;
   agreeResultMessage: string;
   disagreeResultMessage: string;
+  hideAfterAction: boolean;
 }
 
 export interface ApprovalTopicConfig {
@@ -26,9 +27,10 @@ export interface SupplierRoute {
 }
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
-  '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+  '📡 YÊU CẦU PHÊ DUYỆT\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
+  hideAfterAction: false,
   agreeButtonLabel: '👍 Đồng ý',
   disagreeButtonLabel: '👎 Không đồng ý',
   agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -57,6 +59,7 @@ export interface ChatEntry {
 export interface AutomationSetup {
   id: string;
   name: string;
+  sortOrder: number;
   botToken: string;
   sourceGroupId: string;
   sourceThreadIds: number[];
@@ -69,6 +72,8 @@ export interface AutomationSetup {
   approvalTopicConfigs: ApprovalTopicConfig[];
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplierSelectionHideAfterAction: boolean;
+  supplyPromptHideAfterAction: boolean;
   supplyListenGroupId: string;
   supplyListenThreadIds: number[];
   supplyListenThreadId: number | null;

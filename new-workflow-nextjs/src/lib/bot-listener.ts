@@ -350,6 +350,24 @@ async function handleBotUpdate(update: any) {
           reply_markup: { inline_keyboard: [] },
         }, label);
       };
+      const finalizeCallbackStatus = async (bodyText: string, label: string, hideAfterAction: boolean) => {
+        if (!callbackChatId || !callbackMessageId) return;
+        if (hideAfterAction) {
+          const deletion = await deleteTelegramMessage(baseUrl, {
+            chat_id: callbackChatId,
+            message_id: callbackMessageId,
+          }, `${label} delete`);
+          if (deletion.ok) {
+            return;
+          }
+        }
+        await editTelegramMessageWithFallback(baseUrl, {
+          chat_id: callbackChatId,
+          message_id: callbackMessageId,
+          text: `${originalCleanText}\n\n${bodyText}`,
+          reply_markup: { inline_keyboard: [] },
+        }, label);
+      };
       callbackFailureReporter = updateCallbackStatus;
       try {
         if (callbackChatId && callbackMessageId) {
@@ -377,16 +395,8 @@ async function handleBotUpdate(update: any) {
 
           await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
-
-          await fetch(`${baseUrl}/editMessageText`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: cq.message.chat.id,
-              message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '')}`,
-            }),
-          });
+          const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '');
+          const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
 
           const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
           const listenMatch = matchesSupplyListenScope(autoSetup, log);
@@ -419,6 +429,7 @@ async function handleBotUpdate(update: any) {
                 "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
                 [selectionData.result.message_id, logId]
               );
+              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage);
             }
             return;
           }
@@ -434,6 +445,7 @@ async function handleBotUpdate(update: any) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
+            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage);
             return;
           }
 
@@ -445,16 +457,8 @@ async function handleBotUpdate(update: any) {
 
           await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
-
-          await fetch(`${baseUrl}/editMessageText`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: cq.message.chat.id,
-              message_id: cq.message.message_id,
-              text: `${originalCleanText}\n\n${formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '')}`,
-            }),
-          });
+          const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
+          const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
 
           // Send reject notification
           const rejectTarget = resolveApprovalRejectTarget(autoSetup);
@@ -475,6 +479,7 @@ async function handleBotUpdate(update: any) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
+          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage);
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -484,6 +489,7 @@ async function handleBotUpdate(update: any) {
           const routeId = parts[2];
           const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
           const selectedRoute = supplierRoutes.find((route) => route.id === routeId);
+          const hideSupplierSelectionMessage = autoSetup.supplierSelectionHideAfterAction === true;
           if (!selectedRoute) {
             await updateCallbackStatus('❌ Nhà cung ứng đã chọn không còn hợp lệ.', 'callback invalid supplier');
             return;
@@ -500,12 +506,16 @@ async function handleBotUpdate(update: any) {
           });
 
           if (callbackChatId && callbackMessageId) {
-            await editTelegramMessageWithFallback(baseUrl, {
+            if (hideSupplierSelectionMessage) {
+              await finalizeCallbackStatus(`✅ *ĐÃ CHỌN NHÀ CUNG ỨNG:* ${selectedRoute.name}`, 'supplier final ack', true);
+            } else {
+              await editTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
               message_id: callbackMessageId,
               text: `${originalCleanText}\n\n⏳ Đã chọn ${selectedRoute.name}, đang chuyển nội dung...`,
               reply_markup: { inline_keyboard: [] },
-            }, 'supplier ack');
+              }, 'supplier ack');
+            }
           }
 
           void (async () => {
@@ -599,12 +609,19 @@ async function handleBotUpdate(update: any) {
           }
 
           if (callbackChatId && callbackMessageId) {
-            await editTelegramMessageWithFallback(baseUrl, {
+            if (hideSupplierSelectionMessage) {
+              await deleteTelegramMessage(baseUrl, {
+                chat_id: callbackChatId,
+                message_id: callbackMessageId,
+              }, 'supplier final ack');
+            } else {
+              await editTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
               message_id: callbackMessageId,
               text: `${originalCleanText}\n\n✅ *ĐÃ CHỌN NHÀ CUNG ỨNG:* ${selectedRoute.name}`,
               reply_markup: { inline_keyboard: [] },
             }, 'supplier final ack');
+            }
           }
         })().catch((err: any) => {
           emitListenerLog('error', `Xử lý nhà cung ứng "${selectedRoute.name}" lỗi: ${err.message}`, {
@@ -636,6 +653,7 @@ async function handleBotUpdate(update: any) {
         }
 
         await p.query("UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1", [logId]);
+        const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
 
         await fetch(`${baseUrl}/editMessageText`, {
           method: 'POST',
@@ -668,6 +686,7 @@ async function handleBotUpdate(update: any) {
             automationId: log.automation_id,
             step: 'delivery',
           });
+          await finalizeCallbackStatus(`✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`, 'supply agree final', hideSupplyPromptMessage);
         } else {
           emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
             automationId: log.automation_id,
@@ -696,6 +715,7 @@ async function handleBotUpdate(update: any) {
 
         const isChange = action === 'supply_change';
         const newStatus = isChange ? 'supply_changed' : 'supply_rejected';
+        const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
 
         await p.query("UPDATE workflow_logs SET status = $1 WHERE id = $2", [newStatus, logId]);
 
@@ -734,6 +754,7 @@ async function handleBotUpdate(update: any) {
         if (isChange && rejectData.ok) {
           await p.query("UPDATE workflow_logs SET supply_change_msg_id = $1 WHERE id = $2", [rejectData.result.message_id, logId]);
         }
+        await finalizeCallbackStatus(`${statusLabel} bởi ${userFullName}`, 'supply decision final', hideSupplyPromptMessage);
       }
       } finally {
         global.__processingCallbackActions!.delete(actionKey);
@@ -1348,6 +1369,7 @@ function formatApprovalDecisionMessage(
 function resolveApprovalActionConfig(autoSetup: any) {
   const cfg = autoSetup?.approvalActionConfig || {};
   return {
+    hideAfterAction: cfg.hideAfterAction === true,
     agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
       ? cfg.agreeButtonLabel.trim()
       : DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel,
@@ -1359,7 +1381,7 @@ function resolveApprovalActionConfig(autoSetup: any) {
       : DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage,
     disagreeResultMessage: typeof cfg.disagreeResultMessage === 'string' && cfg.disagreeResultMessage.trim()
       ? cfg.disagreeResultMessage.trim()
-    : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage,
+      : DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage,
   };
 }
 
@@ -1704,6 +1726,18 @@ async function editTelegramMessageWithFallback(
 
   console.warn(`[BotListener] Failed to edit ${label}: ${primary.description || 'unknown error'}`);
   return primary;
+}
+
+async function deleteTelegramMessage(
+  baseUrl: string,
+  payload: Record<string, unknown>,
+  label: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const result = await sendTelegramJson(baseUrl, 'deleteMessage', payload);
+  if (!result.ok) {
+    console.warn(`[BotListener] Failed to delete ${label}: ${result.description || 'unknown error'}`);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------

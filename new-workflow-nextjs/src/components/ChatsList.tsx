@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { ChatEntry, AutomationSetup } from '@/lib/automation-types';
 
 interface ChatsListProps {
@@ -10,6 +10,7 @@ interface ChatsListProps {
   onSearchChange: (query: string) => void;
   onSelectAutomation: (id: string) => void;
   onCreateAutomation: () => void;
+  onReorderAutomation: (draggedId: string, targetId: string) => void;
   chats: Record<string, ChatEntry>;
 }
 
@@ -20,8 +21,10 @@ export default function ChatsList({
   onSearchChange,
   onSelectAutomation,
   onCreateAutomation,
+  onReorderAutomation,
   chats,
 }: ChatsListProps) {
+  const [draggedAutomationId, setDraggedAutomationId] = useState<string | null>(null);
 
   const filtered = automations.filter((auto) => {
     const q = searchQuery.toLowerCase();
@@ -91,7 +94,26 @@ export default function ChatsList({
                 key={auto.id}
                 id={`automation-item-${auto.id}`}
                 className={`chat-item${selectedAutomationId === auto.id ? ' active' : ''}`}
+                draggable
+                onDragStart={() => setDraggedAutomationId(auto.id)}
+                onDragEnd={() => setDraggedAutomationId(null)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (!draggedAutomationId || draggedAutomationId === auto.id) {
+                    setDraggedAutomationId(null);
+                    return;
+                  }
+                  onReorderAutomation(draggedAutomationId, auto.id);
+                  setDraggedAutomationId(null);
+                }}
                 onClick={() => onSelectAutomation(auto.id)}
+                style={{
+                  opacity: draggedAutomationId === auto.id ? 0.55 : 1,
+                  borderStyle: draggedAutomationId && draggedAutomationId !== auto.id ? 'dashed' : 'solid',
+                }}
               >
                 <div
                   className="chat-avatar"
@@ -111,6 +133,11 @@ export default function ChatsList({
                 <div className="chat-info">
                   <div className="chat-title-row">
                     <span className="chat-name" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: '600' }}>
+                      <i
+                        className="fa-solid fa-grip-vertical"
+                        style={{ color: 'var(--color-text-muted)', cursor: 'grab', fontSize: '11px' }}
+                        aria-hidden="true"
+                      />
                       {auto.name}
                     </span>
                     <span 

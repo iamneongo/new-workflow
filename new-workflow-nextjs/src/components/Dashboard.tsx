@@ -32,6 +32,22 @@ interface ListenerState {
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
+function reorderAutomationsList(items: AutomationSetup[], draggedId: string, targetId: string): AutomationSetup[] {
+  const draggedIndex = items.findIndex((item) => item.id === draggedId);
+  const targetIndex = items.findIndex((item) => item.id === targetId);
+  if (draggedIndex < 0 || targetIndex < 0 || draggedIndex === targetIndex) {
+    return items;
+  }
+
+  const next = [...items];
+  const [draggedItem] = next.splice(draggedIndex, 1);
+  next.splice(targetIndex, 0, draggedItem);
+  return next.map((item, index) => ({
+    ...item,
+    sortOrder: index,
+  }));
+}
+
 export default function Dashboard() {
   const [chats, setChats] = useState<Record<string, ChatEntry>>({});
   const [automations, setAutomations] = useState<AutomationSetup[]>([]);
@@ -374,6 +390,33 @@ export default function Dashboard() {
       throw new Error(err.error || 'Lỗi không xác định khi lưu cấu hình');
     }
   };
+
+  const handleReorderAutomation = useCallback(async (draggedId: string, targetId: string) => {
+    const nextAutomations = reorderAutomationsList(automations, draggedId, targetId);
+    if (nextAutomations === automations) {
+      return;
+    }
+
+    setAutomations(nextAutomations);
+
+    try {
+      const res = await fetch('/api/automations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderedIds: nextAutomations.map((item) => item.id),
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Không thể lưu thứ tự automation');
+      }
+    } catch (error: any) {
+      await fetchAutomations();
+      alert(error?.message || 'Không thể lưu thứ tự automation');
+    }
+  }, [automations, fetchAutomations]);
 
   // Delete automation setup
   const handleDeleteAutomation = async (id: string) => {
@@ -737,6 +780,7 @@ export default function Dashboard() {
                 setDetailsTab('config');
               }}
               onCreateAutomation={openCreateAutomationModal}
+              onReorderAutomation={handleReorderAutomation}
               chats={chats}
             />
           )}

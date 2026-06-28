@@ -87,12 +87,15 @@ export default function ChatDetails({
   const [approvalDisagreeButtonLabelInput, setApprovalDisagreeButtonLabelInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
   const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
   const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
+  const [approvalHideAfterActionInput, setApprovalHideAfterActionInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction);
   const [approvalTopicConfigsInput, setApprovalTopicConfigsInput] = useState<ApprovalTopicConfig[]>([]);
   const [isApprovalMessageDrawerOpen, setIsApprovalMessageDrawerOpen] = useState(false);
   const [isApprovalTopicDrawerOpen, setIsApprovalTopicDrawerOpen] = useState(false);
 
   const [supplyGroupIdInput, setSupplyGroupIdInput] = useState('');
   const [supplyThreadIdInput, setSupplyThreadIdInput] = useState<number | ''>('');
+  const [supplierSelectionHideAfterActionInput, setSupplierSelectionHideAfterActionInput] = useState(false);
+  const [supplyPromptHideAfterActionInput, setSupplyPromptHideAfterActionInput] = useState(false);
   const [supplyListenGroupIdInput, setSupplyListenGroupIdInput] = useState('');
   const [supplyListenThreadIdsInput, setSupplyListenThreadIdsInput] = useState<number[]>([]);
   const [supplierRoutesInput, setSupplierRoutesInput] = useState<SupplierRoute[]>([]);
@@ -214,6 +217,7 @@ export default function ChatDetails({
       setApprovalDisagreeButtonLabelInput(automation.approvalActionConfig?.disagreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
       setApprovalAgreeResultMessageInput(automation.approvalActionConfig?.agreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
       setApprovalDisagreeResultMessageInput(automation.approvalActionConfig?.disagreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
+      setApprovalHideAfterActionInput(automation.approvalActionConfig?.hideAfterAction === true);
       const sourceThreadIds = Array.isArray(automation.sourceThreadIds) && automation.sourceThreadIds.length > 0
         ? automation.sourceThreadIds
         : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
@@ -228,6 +232,8 @@ export default function ChatDetails({
 
       setSupplyGroupIdInput(automation.supplyGroupId || '');
       setSupplyThreadIdInput(automation.supplyThreadId !== null && automation.supplyThreadId !== undefined ? automation.supplyThreadId : '');
+      setSupplierSelectionHideAfterActionInput(automation.supplierSelectionHideAfterAction === true);
+      setSupplyPromptHideAfterActionInput(automation.supplyPromptHideAfterAction === true);
       setSupplyListenGroupIdInput(automation.supplyListenGroupId || automation.supplyGroupId || '');
       setSupplyListenThreadIdsInput(Array.isArray(automation.supplyListenThreadIds) && automation.supplyListenThreadIds.length > 0
         ? automation.supplyListenThreadIds
@@ -417,12 +423,15 @@ export default function ChatDetails({
           disagreeButtonLabel: approvalDisagreeButtonLabelInput,
           agreeResultMessage: approvalAgreeResultMessageInput,
           disagreeResultMessage: approvalDisagreeResultMessageInput,
+          hideAfterAction: approvalHideAfterActionInput,
         };
         updates.approvalTopicConfigs = approvalTopicConfigsInput;
       }
       if (field === 'supply') {
         updates.supplyGroupId = supplyGroupIdInput;
         updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
+        updates.supplierSelectionHideAfterAction = supplierSelectionHideAfterActionInput;
+        updates.supplyPromptHideAfterAction = supplyPromptHideAfterActionInput;
         updates.supplyListenGroupId = supplyListenGroupIdInput;
         updates.supplyListenThreadIds = supplyListenThreadIdsInput;
         updates.supplyListenThreadId = supplyListenThreadIdsInput[0] ?? null;
@@ -517,6 +526,7 @@ export default function ChatDetails({
       || config.approvalActionConfig.disagreeButtonLabel !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel
       || config.approvalActionConfig.agreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage
       || config.approvalActionConfig.disagreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage
+      || config.approvalActionConfig.hideAfterAction !== DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction
     )
   )).length;
 
@@ -645,6 +655,21 @@ export default function ChatDetails({
               />
             </div>
           </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+            <input
+              type="checkbox"
+              checked={config.approvalActionConfig.hideAfterAction === true}
+              onChange={(e) => setApprovalTopicConfig(threadId, {
+                ...config,
+                approvalActionConfig: {
+                  ...config.approvalActionConfig,
+                  hideAfterAction: e.target.checked,
+                },
+              })}
+            />
+            <span>Ẩn tin nhắn này sau khi đã bấm xử lý xong</span>
+          </label>
         </div>
       );
     });
@@ -723,6 +748,14 @@ export default function ChatDetails({
             </button>
           </div>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+          <input
+            type="checkbox"
+            checked={approvalHideAfterActionInput}
+            onChange={(e) => setApprovalHideAfterActionInput(e.target.checked)}
+          />
+          <span>Xử lý xong thì ẩn tin nhắn bước duyệt này</span>
+        </label>
       </div>
     );
   };
@@ -831,6 +864,25 @@ export default function ChatDetails({
           undefined,
           { hideActions: true, selectorId: 'supply-listen-drawer', topicLabel: 'Chọn topic bot sẽ theo dõi:' }
         )}
+      </div>
+      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Ẩn tin sau khi xử lý</strong>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+          <input
+            type="checkbox"
+            checked={supplierSelectionHideAfterActionInput}
+            onChange={(e) => setSupplierSelectionHideAfterActionInput(e.target.checked)}
+          />
+          <span>Ẩn tin nhắn chọn nhà cung ứng sau khi đã chọn xong</span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+          <input
+            type="checkbox"
+            checked={supplyPromptHideAfterActionInput}
+            onChange={(e) => setSupplyPromptHideAfterActionInput(e.target.checked)}
+          />
+          <span>Ẩn tin nhắn gửi cho nhà cung ứng sau khi họ bấm xử lý</span>
+        </label>
       </div>
     </div>
     );
@@ -1051,6 +1103,7 @@ export default function ChatDetails({
       disagreeButtonLabel: approvalDisagreeButtonLabelInput,
       agreeResultMessage: approvalAgreeResultMessageInput,
       disagreeResultMessage: approvalDisagreeResultMessageInput,
+      hideAfterAction: approvalHideAfterActionInput,
     },
   });
 

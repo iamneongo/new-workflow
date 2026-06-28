@@ -31,10 +31,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const {
-      id, name, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
+      id, name, sortOrder, botToken, sourceGroupId, sourceThreadId, sourceThreadIds,
       approvalGroupId, approvalThreadId, approvalMessageMode, approvalCustomMessage,
       approvalActionConfig, approvalTopicConfigs,
-      supplyGroupId, supplyThreadId, supplyListenGroupId, supplyListenThreadIds, supplyListenThreadId, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
+      supplyGroupId, supplyThreadId, supplierSelectionHideAfterAction, supplyPromptHideAfterAction, supplyListenGroupId, supplyListenThreadIds, supplyListenThreadId, supplyChangeGroupId, supplyChangeThreadId, supplyChangeMessageMode, supplierRoutes,
       deliveryGroupId, deliveryThreadId,
       finalMessageMode,
       finalGroupId, finalThreadId,
@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
 
     const updates: Partial<AutomationSetup> & { id: string } = { id };
     if (name !== undefined) updates.name = name;
+    if (sortOrder !== undefined) updates.sortOrder = Number(sortOrder);
     if (sourceGroupId !== undefined) updates.sourceGroupId = sourceGroupId;
     if (sourceThreadIds !== undefined) {
       updates.sourceThreadIds = sourceThreadIds;
@@ -80,6 +81,8 @@ export async function POST(req: NextRequest) {
     if (approvalTopicConfigs !== undefined) updates.approvalTopicConfigs = approvalTopicConfigs;
     if (supplyGroupId !== undefined) updates.supplyGroupId = supplyGroupId;
     if (supplyThreadId !== undefined) updates.supplyThreadId = normalizeThreadId(supplyThreadId);
+    if (supplierSelectionHideAfterAction !== undefined) updates.supplierSelectionHideAfterAction = supplierSelectionHideAfterAction === true;
+    if (supplyPromptHideAfterAction !== undefined) updates.supplyPromptHideAfterAction = supplyPromptHideAfterAction === true;
     if (supplyListenGroupId !== undefined) updates.supplyListenGroupId = supplyListenGroupId;
     if (supplyListenThreadIds !== undefined) updates.supplyListenThreadIds = normalizeThreadIds(supplyListenThreadIds);
     if (supplyListenThreadId !== undefined) updates.supplyListenThreadId = normalizeThreadId(supplyListenThreadId);
@@ -116,6 +119,37 @@ export async function POST(req: NextRequest) {
         hasToken: !!updated.botToken,
       },
     });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const orderedIds = Array.isArray(body?.orderedIds)
+      ? body.orderedIds.filter((id: unknown): id is string => typeof id === 'string' && id.trim().length > 0)
+      : [];
+
+    if (orderedIds.length === 0) {
+      return NextResponse.json({ error: 'Thiếu danh sách thứ tự automation' }, { status: 400 });
+    }
+
+    for (let index = 0; index < orderedIds.length; index += 1) {
+      await saveAutomationSetup({
+        id: orderedIds[index],
+        sortOrder: index,
+      });
+    }
+
+    const setups = await loadAutomationSetups();
+    const masked = setups.map((s) => ({
+      ...s,
+      botToken: s.botToken ? `****${s.botToken.slice(-6)}` : '',
+      hasToken: !!s.botToken,
+    }));
+
+    return NextResponse.json({ success: true, setups: masked });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

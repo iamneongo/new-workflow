@@ -94,6 +94,7 @@ export interface ApprovalActionConfig {
   disagreeButtonLabel: string;
   agreeResultMessage: string;
   disagreeResultMessage: string;
+  hideAfterAction: boolean;
 }
 
 export interface ApprovalTopicConfig {
@@ -117,6 +118,7 @@ export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMod
 
 export function normalizeApprovalActionConfig(value: unknown): ApprovalActionConfig {
   const fallback: ApprovalActionConfig = {
+    hideAfterAction: false,
     agreeButtonLabel: '👍 Đồng ý',
     disagreeButtonLabel: '👎 Không đồng ý',
     agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -129,6 +131,7 @@ export function normalizeApprovalActionConfig(value: unknown): ApprovalActionCon
 
   const cfg = value as Partial<ApprovalActionConfig>;
   return {
+    hideAfterAction: cfg.hideAfterAction === true,
     agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
       ? cfg.agreeButtonLabel.trim()
       : fallback.agreeButtonLabel,
@@ -184,9 +187,10 @@ export function normalizeSupplierRouteMode(value: unknown): SupplierRouteMode {
 }
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
-  '📡 *YÊU CẦU PHÊ DUYỆT VẬT TƯ MỚI*\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+  '📡 YÊU CẦU PHÊ DUYỆT\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
+  hideAfterAction: false,
   agreeButtonLabel: '👍 Đồng ý',
   disagreeButtonLabel: '👎 Không đồng ý',
   agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -289,6 +293,7 @@ export interface ChatEntry {
 export interface AutomationSetup {
   id: string;
   name: string;
+  sortOrder: number;
   botToken: string;
   sourceGroupId: string;
   sourceThreadIds: number[];
@@ -301,6 +306,8 @@ export interface AutomationSetup {
   approvalTopicConfigs: ApprovalTopicConfig[];
   supplyGroupId: string;
   supplyThreadId: number | null;
+  supplierSelectionHideAfterAction: boolean;
+  supplyPromptHideAfterAction: boolean;
   supplyListenGroupId: string;
   supplyListenThreadIds: number[];
   supplyListenThreadId: number | null;
@@ -367,6 +374,7 @@ export async function ensureDatabase(): Promise<void> {
       CREATE TABLE IF NOT EXISTS automation_setups (
         id VARCHAR(100) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
+        sort_order INTEGER DEFAULT 0 NOT NULL,
         bot_token VARCHAR(255),
         source_group_id VARCHAR(100),
         source_thread_ids INTEGER[],
@@ -379,6 +387,8 @@ export async function ensureDatabase(): Promise<void> {
         approval_topic_configs JSONB,
         supply_group_id VARCHAR(100),
         supply_thread_id INTEGER,
+        supplier_selection_hide_after_action BOOLEAN DEFAULT FALSE NOT NULL,
+        supply_prompt_hide_after_action BOOLEAN DEFAULT FALSE NOT NULL,
         supply_listen_group_id VARCHAR(100),
         supply_listen_thread_ids INTEGER[],
         supply_listen_thread_id INTEGER,
@@ -404,6 +414,7 @@ export async function ensureDatabase(): Promise<void> {
     const alterQueries = [
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_ids INTEGER[]',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_message_mode VARCHAR(20)',
@@ -412,6 +423,8 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_topic_configs JSONB',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supplier_selection_hide_after_action BOOLEAN DEFAULT FALSE',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_prompt_hide_after_action BOOLEAN DEFAULT FALSE',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_thread_ids INTEGER[]',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS supply_listen_thread_id INTEGER',
@@ -432,6 +445,18 @@ export async function ensureDatabase(): Promise<void> {
     for (const q of alterQueries) {
       await client.query(q);
     }
+
+    await client.query(`
+      WITH ordered AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY COALESCE(sort_order, 2147483647), name ASC, id ASC) - 1 AS next_sort_order
+        FROM automation_setups
+      )
+      UPDATE automation_setups AS setups
+      SET sort_order = ordered.next_sort_order
+      FROM ordered
+      WHERE setups.id = ordered.id
+        AND (setups.sort_order IS NULL OR setups.sort_order <> ordered.next_sort_order)
+    `);
 
     await client.query(`
       UPDATE automation_setups
@@ -477,6 +502,7 @@ export async function ensureDatabase(): Promise<void> {
       SET approval_action_config = COALESCE(approval_action_config, $1::jsonb)
       WHERE approval_action_config IS NULL
     `, [JSON.stringify({
+      hideAfterAction: false,
       agreeButtonLabel: '👍 Đồng ý',
       disagreeButtonLabel: '👎 Không đồng ý',
       agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -776,6 +802,7 @@ export async function deleteTelegramSessionString(): Promise<void> {
 const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   id,
   name: 'Automation mới',
+  sortOrder: 0,
   botToken: '',
   sourceGroupId: '',
   sourceThreadIds: [],
@@ -785,6 +812,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalMessageMode: 'forward',
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   approvalActionConfig: {
+    hideAfterAction: false,
     agreeButtonLabel: '👍 Đồng ý',
     disagreeButtonLabel: '👎 Không đồng ý',
     agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -793,6 +821,8 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalTopicConfigs: [],
   supplyGroupId: '',
   supplyThreadId: null,
+  supplierSelectionHideAfterAction: false,
+  supplyPromptHideAfterAction: false,
   supplyListenGroupId: '',
   supplyListenThreadIds: [],
   supplyListenThreadId: null,
@@ -821,12 +851,13 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
   try {
     await ensureDatabase();
     const globalToken = await loadGlobalBotToken();
-    const res = await p.query('SELECT * FROM automation_setups ORDER BY name ASC');
+    const res = await p.query('SELECT * FROM automation_setups ORDER BY sort_order ASC, name ASC');
     return res.rows.map((row) => {
       const sourceThreadIds = readStoredThreadIds(row.source_thread_ids, row.source_thread_id);
       return {
         id: row.id,
         name: row.name,
+        sortOrder: Number(row.sort_order ?? 0),
         botToken: globalToken,
         sourceGroupId: row.source_group_id || '',
         sourceThreadIds,
@@ -839,6 +870,8 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         approvalTopicConfigs: normalizeApprovalTopicConfigs(row.approval_topic_configs),
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplierSelectionHideAfterAction: row.supplier_selection_hide_after_action === true,
+        supplyPromptHideAfterAction: row.supply_prompt_hide_after_action === true,
         supplyListenGroupId: row.supply_listen_group_id || '',
         supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
         supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
@@ -880,6 +913,7 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
     return {
       id: row.id,
       name: row.name,
+      sortOrder: Number(row.sort_order ?? 0),
       botToken: globalToken,
       sourceGroupId: row.source_group_id || '',
       sourceThreadIds,
@@ -892,6 +926,8 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       approvalTopicConfigs: normalizeApprovalTopicConfigs(row.approval_topic_configs),
       supplyGroupId: row.supply_group_id || '',
       supplyThreadId: normalizeThreadId(row.supply_thread_id),
+      supplierSelectionHideAfterAction: row.supplier_selection_hide_after_action === true,
+      supplyPromptHideAfterAction: row.supply_prompt_hide_after_action === true,
       supplyListenGroupId: row.supply_listen_group_id || '',
       supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
       supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
@@ -924,9 +960,20 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
   const p = getPool();
   try {
     await ensureDatabase();
-    const current = await loadAutomationSetup(setup.id) || DEFAULT_AUTOMATION_SETUP(setup.id);
+    const existing = await loadAutomationSetup(setup.id);
+    const current = existing || DEFAULT_AUTOMATION_SETUP(setup.id);
     const hasField = (key: keyof AutomationSetup) =>
       Object.prototype.hasOwnProperty.call(setup, key);
+    let sortOrder = hasField('sortOrder')
+      ? Number(setup.sortOrder ?? current.sortOrder)
+      : current.sortOrder;
+    if (!Number.isFinite(sortOrder) || sortOrder < 0) {
+      sortOrder = current.sortOrder;
+    }
+    if (!existing && !hasField('sortOrder')) {
+      const maxSortRes = await p.query('SELECT COALESCE(MAX(sort_order), -1) AS max_sort_order FROM automation_setups');
+      sortOrder = Number(maxSortRes.rows[0]?.max_sort_order ?? -1) + 1;
+    }
     const sourceThreadIds = hasField('sourceThreadIds')
       ? normalizeThreadIds(setup.sourceThreadIds)
       : hasField('sourceThreadId')
@@ -936,6 +983,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
     const updated = {
       ...current,
       ...setup,
+      sortOrder,
       sourceThreadIds,
       sourceThreadId: sourceThreadIds[0] ?? null,
       approvalMessageMode: hasField('approvalMessageMode')
@@ -953,6 +1001,12 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       supplierRoutes: hasField('supplierRoutes')
         ? normalizeSupplierRoutes(setup.supplierRoutes)
         : current.supplierRoutes,
+      supplierSelectionHideAfterAction: hasField('supplierSelectionHideAfterAction')
+        ? setup.supplierSelectionHideAfterAction === true
+        : current.supplierSelectionHideAfterAction,
+      supplyPromptHideAfterAction: hasField('supplyPromptHideAfterAction')
+        ? setup.supplyPromptHideAfterAction === true
+        : current.supplyPromptHideAfterAction,
       approvalThreadId: hasField('approvalThreadId') ? normalizeThreadId(setup.approvalThreadId) : current.approvalThreadId,
       supplyThreadId: hasField('supplyThreadId') ? normalizeThreadId(setup.supplyThreadId) : current.supplyThreadId,
       supplyListenGroupId: hasField('supplyListenGroupId')
@@ -983,17 +1037,18 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
 
     await p.query(`
         INSERT INTO automation_setups (
-        id, name, source_group_id, source_thread_id, source_thread_ids,
+        id, name, sort_order, source_group_id, source_thread_id, source_thread_ids,
         approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message, approval_action_config, approval_topic_configs,
-        supply_group_id, supply_thread_id, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
+        supply_group_id, supply_thread_id, supplier_selection_hide_after_action, supply_prompt_hide_after_action, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
+        sort_order = EXCLUDED.sort_order,
         source_group_id = EXCLUDED.source_group_id,
         source_thread_id = EXCLUDED.source_thread_id,
         source_thread_ids = EXCLUDED.source_thread_ids,
@@ -1005,6 +1060,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         approval_topic_configs = EXCLUDED.approval_topic_configs,
         supply_group_id = EXCLUDED.supply_group_id,
         supply_thread_id = EXCLUDED.supply_thread_id,
+        supplier_selection_hide_after_action = EXCLUDED.supplier_selection_hide_after_action,
+        supply_prompt_hide_after_action = EXCLUDED.supply_prompt_hide_after_action,
         supply_listen_group_id = EXCLUDED.supply_listen_group_id,
         supply_listen_thread_ids = EXCLUDED.supply_listen_thread_ids,
         supply_listen_thread_id = EXCLUDED.supply_listen_thread_id,
@@ -1026,6 +1083,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
     `, [
       updated.id,
       updated.name,
+      updated.sortOrder,
       updated.sourceGroupId,
       updated.sourceThreadId,
       storedSourceThreadIds,
@@ -1037,6 +1095,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       JSON.stringify(updated.approvalTopicConfigs),
       updated.supplyGroupId,
       updated.supplyThreadId,
+      updated.supplierSelectionHideAfterAction,
+      updated.supplyPromptHideAfterAction,
       updated.supplyListenGroupId,
       updated.supplyListenThreadIds.length > 0 ? updated.supplyListenThreadIds : null,
       updated.supplyListenThreadId,
@@ -1092,6 +1152,7 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
       return {
         id: row.id,
         name: row.name,
+        sortOrder: Number(row.sort_order ?? 0),
         botToken: globalToken,
         sourceGroupId: row.source_group_id || '',
         sourceThreadIds,
@@ -1104,6 +1165,8 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         approvalTopicConfigs: normalizeApprovalTopicConfigs(row.approval_topic_configs),
         supplyGroupId: row.supply_group_id || '',
         supplyThreadId: normalizeThreadId(row.supply_thread_id),
+        supplierSelectionHideAfterAction: row.supplier_selection_hide_after_action === true,
+        supplyPromptHideAfterAction: row.supply_prompt_hide_after_action === true,
         supplyListenGroupId: row.supply_listen_group_id || '',
         supplyListenThreadIds: readStoredThreadIds(row.supply_listen_thread_ids, row.supply_listen_thread_id),
         supplyListenThreadId: normalizeThreadId(row.supply_listen_thread_id),
