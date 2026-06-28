@@ -401,7 +401,11 @@ export default function ChatDetails({
   };
 
   // Save config for card
-  const handleSaveCard = async (field: 'source' | 'bot' | 'approval' | 'supply' | 'supplyChange' | 'delivery' | 'final' | 'reject') => {
+  const handleSaveCard = async (
+    field: 'source' | 'bot' | 'approval' | 'supply' | 'supplyChange' | 'delivery' | 'final' | 'reject',
+    options?: { closeCard?: boolean }
+  ) => {
+    const closeCard = options?.closeCard !== false;
     setIsSaving(true);
     try {
       const updates: Partial<AutomationSetup> & { id: string } = { id: automation!.id };
@@ -457,7 +461,9 @@ export default function ChatDetails({
       }
 
       await onSaveAutomation({ ...updates, restartIfListening: listenerActive });
-      setEditCard(null);
+      if (closeCard) {
+        setEditCard(null);
+      }
       showStatus(listenerActive
         ? '✅ Đã lưu cấu hình và khởi động lại bot!'
         : '✅ Đã lưu cấu hình bước thành công!');
@@ -682,9 +688,53 @@ export default function ChatDetails({
     onClose: () => void,
     content: React.ReactNode,
     footerNote: string,
-    footerActionLabel = 'Xong'
+    footerActionLabel = 'Xong',
+    onFooterAction?: () => void | Promise<void>
   ) => {
     if (!isOpen) return null;
+
+    const shouldAutoSaveOnDone =
+      (isApprovalMessageDrawerOpen && editCard === 'approval')
+      || (isSupplyConfigDrawerOpen && editCard === 'supply')
+      || (isSupplyChangeDrawerOpen && editCard === 'supplyChange')
+      || (isFinalConfigDrawerOpen && editCard === 'final');
+
+    const effectiveFooterNote = shouldAutoSaveOnDone
+      ? 'Bấm Xong là hệ thống sẽ lưu ngay cấu hình này.'
+      : footerNote;
+
+    const handleDrawerDone = async () => {
+      if (onFooterAction) {
+        await onFooterAction();
+        return;
+      }
+
+      if (isApprovalMessageDrawerOpen && editCard === 'approval') {
+        await handleSaveCard('approval', { closeCard: false });
+        setIsApprovalMessageDrawerOpen(false);
+        return;
+      }
+
+      if (isSupplyConfigDrawerOpen && editCard === 'supply') {
+        await handleSaveCard('supply', { closeCard: false });
+        setIsSupplyConfigDrawerOpen(false);
+        return;
+      }
+
+      if (isSupplyChangeDrawerOpen && editCard === 'supplyChange') {
+        await handleSaveCard('supplyChange', { closeCard: false });
+        setIsSupplyChangeDrawerOpen(false);
+        return;
+      }
+
+      if (isFinalConfigDrawerOpen && editCard === 'final') {
+        await handleSaveCard('final', { closeCard: false });
+        setIsFinalConfigDrawerOpen(false);
+        return;
+      }
+
+      onClose();
+    };
 
     return (
       <div
@@ -736,12 +786,14 @@ export default function ChatDetails({
 
           <div style={{ padding: '14px 18px 18px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-              {footerNote}
+              {effectiveFooterNote}
             </span>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={onClose}
+              onClick={() => {
+                void handleDrawerDone();
+              }}
               style={{ padding: '8px 12px', fontSize: '11px', borderRadius: '999px' }}
             >
               {footerActionLabel}
@@ -2773,7 +2825,10 @@ export default function ChatDetails({
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => setIsApprovalTopicDrawerOpen(false)}
+                onClick={async () => {
+                  await handleSaveCard('approval', { closeCard: false });
+                  setIsApprovalTopicDrawerOpen(false);
+                }}
                 style={{ padding: '8px 12px', fontSize: '11px', borderRadius: '999px' }}
               >
                 Xong
