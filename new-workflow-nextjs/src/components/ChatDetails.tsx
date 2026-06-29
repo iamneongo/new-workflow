@@ -1109,6 +1109,7 @@ export default function ChatDetails({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nội dung thông báo từ chối mặc định</label>
         <textarea
+          id="tour-reject-custom-message"
           value={rejectCustomMessageInput}
           onChange={(e) => setRejectCustomMessageInput(e.target.value)}
           rows={6}
@@ -1120,7 +1121,7 @@ export default function ChatDetails({
         </span>
       </div>
 
-      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div id="tour-reject-topic-configs" style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <div style={{ fontSize: '11px', color: 'var(--color-text)', fontWeight: 600 }}>
             Nội dung riêng theo từng topic nguồn
@@ -2564,7 +2565,7 @@ export default function ChatDetails({
                           setRejectThreadIdInput,
                           () => setEditCard(null),
                           () => handleSaveCard('reject'),
-                          <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div id="tour-reject-extra-controls" style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
                                 <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
@@ -2576,6 +2577,7 @@ export default function ChatDetails({
                               </div>
                               <button
                                 type="button"
+                                id="tour-reject-open-message"
                                 className="btn btn-secondary"
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2589,6 +2591,7 @@ export default function ChatDetails({
 
                             <button
                               type="button"
+                              id="tour-reject-message-preview"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIsRejectConfigDrawerOpen(true);

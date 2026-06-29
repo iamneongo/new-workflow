@@ -5,7 +5,6 @@ import React, { useCallback, useEffect, useRef } from 'react';
 type AppTourProps = {
   selectedAutomationId: string | null;
   hasAutomations: boolean;
-  isLoading: boolean;
   activeWorkflowNode: WorkflowNodeKey | null;
 };
 
@@ -24,12 +23,11 @@ type TourStep = {
   disableActiveInteraction?: boolean;
 };
 
-const TOUR_SEEN_KEY = 'telegram-bot-tracker-tour-seen-v2';
+const TOUR_SEEN_KEY = 'telegram-bot-tracker-tour-seen-v3';
 
 export default function AppTour({
   selectedAutomationId,
   hasAutomations,
-  isLoading,
   activeWorkflowNode,
 }: AppTourProps) {
   const driverRef = useRef<any>(null);
@@ -369,6 +367,49 @@ export default function AppTour({
       });
     }
 
+    if (node === 'reject') {
+      pushStep(steps, '#tour-reject-extra-controls', {
+        popover: {
+          title: 'Phần nội dung từ chối',
+          description: 'Ngay dưới phần chọn nhóm là khu chỉnh nội dung. Từ đây bạn có thể mở sâu hơn để sửa mẫu tin và nội dung riêng cho từng topic nguồn.',
+          side: 'top',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-reject-open-message', {
+        popover: {
+          title: 'Mở phần chi tiết',
+          description: 'Bấm nút này để chỉnh kỹ nội dung thông báo từ chối thay vì chỉ xem nhanh ở node.',
+          side: 'left',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-reject-message-preview', {
+        popover: {
+          title: 'Xem nhanh mẫu đang dùng',
+          description: 'Khung này cho bạn xem nhanh mẫu tin từ chối hiện tại trước khi mở phần chỉnh sửa đầy đủ.',
+          side: 'top',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-reject-custom-message', {
+        popover: {
+          title: 'Mẫu từ chối mặc định',
+          description: 'Đây là mẫu chung bot sẽ dùng khi topic đó chưa có nội dung riêng. Bạn có thể chèn tên người duyệt, người gửi và nội dung gốc vào đây.',
+          side: 'left',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-reject-topic-configs', {
+        popover: {
+          title: 'Nội dung riêng theo topic',
+          description: 'Nếu mỗi topic nguồn cần một cách báo từ chối khác nhau, bạn chỉnh riêng tại khu này để bot gửi đúng ngữ cảnh hơn.',
+          side: 'left',
+          align: 'start',
+        },
+      });
+    }
+
     if (node === 'supply') {
       pushStep(steps, '#tour-node-supply', {
         popover: {
@@ -602,31 +643,6 @@ export default function AppTour({
     driverRef.current = instance;
     instance.drive();
   }, [buildIntroSteps, buildWorkflowSteps, destroyTour]);
-
-  useEffect(() => {
-    if (isLoading) return;
-    if (typeof window === 'undefined') return;
-    if (window.localStorage.getItem(TOUR_SEEN_KEY) === '1') return;
-    if (tourPhaseRef.current !== 'idle') return;
-
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        if (!selectedAutomationId) {
-          await startTour('intro');
-          return;
-        }
-
-        if (activeWorkflowNode) {
-          await startNodeTour(activeWorkflowNode);
-          return;
-        }
-
-        await startTour('workflow');
-      })();
-    }, 900);
-
-    return () => window.clearTimeout(timer);
-  }, [activeWorkflowNode, isLoading, selectedAutomationId, startNodeTour, startTour]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

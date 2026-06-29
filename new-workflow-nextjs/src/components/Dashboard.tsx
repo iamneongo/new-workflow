@@ -581,7 +581,6 @@ export default function Dashboard() {
           <AppTour
             selectedAutomationId={selectedAutomationId}
             hasAutomations={automations.length > 0}
-            isLoading={isLoading}
             activeWorkflowNode={activeWorkflowNode}
           />
 
