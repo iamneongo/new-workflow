@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig } from '@/lib/automation-types';
-import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG } from '@/lib/automation-types';
+import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig, RejectTopicConfig } from '@/lib/automation-types';
+import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_REJECT_CUSTOM_MESSAGE, DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
@@ -128,6 +128,9 @@ export default function ChatDetails({
 
   const [rejectGroupIdInput, setRejectGroupIdInput] = useState('');
   const [rejectThreadIdInput, setRejectThreadIdInput] = useState<number | ''>('');
+  const [rejectCustomMessageInput, setRejectCustomMessageInput] = useState(DEFAULT_REJECT_CUSTOM_MESSAGE);
+  const [rejectTopicConfigsInput, setRejectTopicConfigsInput] = useState<RejectTopicConfig[]>([]);
+  const [isRejectConfigDrawerOpen, setIsRejectConfigDrawerOpen] = useState(false);
 
   // Bot test status
   const [tokenStatus, setTokenStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -162,6 +165,9 @@ export default function ChatDetails({
     if (editCard !== 'final') {
       setIsFinalConfigDrawerOpen(false);
     }
+    if (editCard !== 'reject') {
+      setIsRejectConfigDrawerOpen(false);
+    }
   }, [editCard]);
 
   // Click outside to dismiss group selector dropdown
@@ -185,6 +191,7 @@ export default function ChatDetails({
       || isSupplyConfigDrawerOpen
       || isSupplyChangeDrawerOpen
       || isFinalConfigDrawerOpen
+      || isRejectConfigDrawerOpen
     );
     if (!hasOpenDrawer) return;
 
@@ -195,6 +202,7 @@ export default function ChatDetails({
         setIsSupplyConfigDrawerOpen(false);
         setIsSupplyChangeDrawerOpen(false);
         setIsFinalConfigDrawerOpen(false);
+        setIsRejectConfigDrawerOpen(false);
       }
     };
 
@@ -206,6 +214,7 @@ export default function ChatDetails({
     isSupplyConfigDrawerOpen,
     isSupplyChangeDrawerOpen,
     isFinalConfigDrawerOpen,
+    isRejectConfigDrawerOpen,
   ]);
 
 
@@ -277,6 +286,13 @@ export default function ChatDetails({
 
       setRejectGroupIdInput(automation.rejectGroupId || '');
       setRejectThreadIdInput(automation.rejectThreadId !== null && automation.rejectThreadId !== undefined ? automation.rejectThreadId : '');
+      setRejectCustomMessageInput(automation.rejectCustomMessage || DEFAULT_REJECT_CUSTOM_MESSAGE);
+      setRejectTopicConfigsInput(
+        syncRejectTopicConfigs(
+          sourceThreadIds,
+          Array.isArray(automation.rejectTopicConfigs) ? automation.rejectTopicConfigs : []
+        )
+      );
 
       setTokenStatus('idle');
       setTokenBotName('');
@@ -290,6 +306,10 @@ export default function ChatDetails({
 
   useEffect(() => {
     setApprovalTopicConfigsInput((current) => syncApprovalTopicConfigs(sourceThreadIdsInput, current));
+  }, [sourceThreadIdsInput]);
+
+  useEffect(() => {
+    setRejectTopicConfigsInput((current) => syncRejectTopicConfigs(sourceThreadIdsInput, current));
   }, [sourceThreadIdsInput]);
 
   useEffect(() => {
@@ -481,6 +501,8 @@ export default function ChatDetails({
       if (field === 'reject') {
         updates.rejectGroupId = rejectGroupIdInput;
         updates.rejectThreadId = rejectThreadIdInput === '' ? null : Number(rejectThreadIdInput);
+        updates.rejectCustomMessage = rejectCustomMessageInput;
+        updates.rejectTopicConfigs = rejectTopicConfigsInput;
       }
 
       await onSaveAutomation({ ...updates, restartIfListening: listenerActive });
@@ -558,9 +580,26 @@ export default function ChatDetails({
       || config.approvalActionConfig.hideAfterAction !== DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction
     )
   )).length;
+  const rejectTopicManagedCount = sourceThreadIdsInput.length;
+  const rejectTopicCustomCount = rejectTopicConfigsInput.filter((config) => (
+    sourceThreadIdsInput.includes(config.sourceThreadId)
+    && config.rejectCustomMessage.trim() !== rejectCustomMessageInput.trim()
+  )).length;
 
   const setApprovalTopicConfig = (threadId: number, next: ApprovalTopicConfig) => {
     setApprovalTopicConfigsInput((current) => {
+      const exists = current.findIndex((item) => item.sourceThreadId === threadId);
+      if (exists >= 0) {
+        const cloned = [...current];
+        cloned[exists] = next;
+        return cloned;
+      }
+      return [...current, next];
+    });
+  };
+
+  const setRejectTopicConfig = (threadId: number, next: RejectTopicConfig) => {
+    setRejectTopicConfigsInput((current) => {
       const exists = current.findIndex((item) => item.sourceThreadId === threadId);
       if (exists >= 0) {
         const cloned = [...current];
@@ -704,6 +743,63 @@ export default function ChatDetails({
     });
   };
 
+  const renderRejectTopicConfigCards = () => {
+    if (sourceThreadIdsInput.length === 0) {
+      return (
+        <div style={{ padding: '14px', fontSize: '12px', color: 'var(--color-text-muted)', border: '1px dashed var(--border-color)', borderRadius: '10px', background: 'var(--bg-primary)', lineHeight: 1.5 }}>
+          Chọn ít nhất 1 topic nguồn ở Bước 1 để bật nội dung từ chối riêng cho từng topic.
+        </div>
+      );
+    }
+
+    return sourceThreadIdsInput.map((threadId) => {
+      const topicEntry = approvalSourceGroupIdForEditor && chats[approvalSourceGroupIdForEditor]?.topics
+        ? Object.values(chats[approvalSourceGroupIdForEditor].topics).find((topic) => topic.threadId === threadId)
+        : null;
+      const configIndex = rejectTopicConfigsInput.findIndex((item) => item.sourceThreadId === threadId);
+      const config = configIndex >= 0
+        ? rejectTopicConfigsInput[configIndex]
+        : createDefaultRejectTopicConfig(threadId);
+
+      return (
+        <div key={threadId} style={{ border: '1px solid var(--border-color)', borderRadius: '12px', padding: '14px', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Topic nguồn:</span>
+              {topicEntry ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(16, 185, 129, 0.08)', padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <span>{topicEntry.topicIcon || '💬'}</span>
+                  <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>{topicEntry.topicName}</span>
+                </span>
+              ) : (
+                <span style={{ color: 'var(--color-text)', fontWeight: 600, fontSize: '11px' }}>Topic #{threadId}</span>
+              )}
+            </div>
+            <span style={{ fontSize: '10px', color: configIndex >= 0 ? 'var(--accent-blue)' : 'var(--color-text-muted)', fontWeight: 600 }}>
+              {configIndex >= 0 ? 'Đang chỉnh riêng' : 'Đang dùng mẫu mặc định'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nội dung từ chối riêng:</label>
+            <textarea
+              rows={5}
+              value={config.rejectCustomMessage}
+              onChange={(e) => setRejectTopicConfig(threadId, {
+                ...config,
+                rejectCustomMessage: e.target.value,
+              })}
+              style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45, minHeight: '120px' }}
+            />
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+              Bạn có thể dùng <code>{'{{userFullName}}'}</code>, <code>{'{{senderName}}'}</code>, <code>{'{{originalText}}'}</code> để bot tự điền thông tin.
+            </span>
+          </div>
+        </div>
+      );
+    });
+  };
+
   const renderDrawerShell = (
     isOpen: boolean,
     title: string,
@@ -720,7 +816,8 @@ export default function ChatDetails({
       (isApprovalMessageDrawerOpen && editCard === 'approval')
       || (isSupplyConfigDrawerOpen && editCard === 'supply')
       || (isSupplyChangeDrawerOpen && editCard === 'supplyChange')
-      || (isFinalConfigDrawerOpen && editCard === 'final');
+      || (isFinalConfigDrawerOpen && editCard === 'final')
+      || (isRejectConfigDrawerOpen && editCard === 'reject');
 
     const effectiveFooterNote = shouldAutoSaveOnDone
       ? 'Bấm Xong là hệ thống sẽ lưu ngay cấu hình này.'
@@ -753,6 +850,12 @@ export default function ChatDetails({
       if (isFinalConfigDrawerOpen && editCard === 'final') {
         await handleSaveCard('final', { closeCard: false });
         setIsFinalConfigDrawerOpen(false);
+        return;
+      }
+
+      if (isRejectConfigDrawerOpen && editCard === 'reject') {
+        await handleSaveCard('reject', { closeCard: false });
+        setIsRejectConfigDrawerOpen(false);
         return;
       }
 
@@ -1001,6 +1104,46 @@ export default function ChatDetails({
     </div>
   );
 
+  const rejectConfigPanel = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nội dung thông báo từ chối mặc định</label>
+        <textarea
+          value={rejectCustomMessageInput}
+          onChange={(e) => setRejectCustomMessageInput(e.target.value)}
+          rows={6}
+          placeholder={DEFAULT_REJECT_CUSTOM_MESSAGE}
+          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', minHeight: '132px', lineHeight: 1.45 }}
+        />
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+          Bạn có thể dùng <code>{'{{userFullName}}'}</code>, <code>{'{{senderName}}'}</code>, <code>{'{{originalText}}'}</code> để bot tự điền thông tin.
+        </span>
+      </div>
+
+      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ fontSize: '11px', color: 'var(--color-text)', fontWeight: 600 }}>
+            Nội dung riêng theo từng topic nguồn
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+            Nếu mỗi topic cần một cách báo từ chối khác nhau, bạn chỉnh riêng ngay bên dưới.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: '999px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.18)', fontSize: '11px', color: 'var(--color-text)' }}>
+            {rejectTopicManagedCount} topic đang quản lý
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: '999px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.18)', fontSize: '11px', color: 'var(--color-text)' }}>
+            {rejectTopicCustomCount} topic có nội dung riêng
+          </span>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {renderRejectTopicConfigCards()}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderSourceGroupTopicBadge = (groupId: string, threadIds: number[]) => {
     const chat = chats[groupId];
     if (!chat) {
@@ -1182,9 +1325,19 @@ export default function ChatDetails({
     },
   });
 
+  const createDefaultRejectTopicConfig = (sourceThreadId: number): RejectTopicConfig => ({
+    sourceThreadId,
+    rejectCustomMessage: rejectCustomMessageInput,
+  });
+
   const syncApprovalTopicConfigs = (sourceThreadIds: number[], existing: ApprovalTopicConfig[]) => {
     const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
     return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultApprovalTopicConfig(threadId));
+  };
+
+  const syncRejectTopicConfigs = (sourceThreadIds: number[], existing: RejectTopicConfig[]) => {
+    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
+    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultRejectTopicConfig(threadId));
   };
 
   const renderGroupTopicSelector = (
@@ -2411,18 +2564,80 @@ export default function ChatDetails({
                           setRejectThreadIdInput,
                           () => setEditCard(null),
                           () => handleSaveCard('reject'),
-                          undefined,
+                          <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: 0 }}>
+                                <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>
+                                  Nội dung thông báo từ chối
+                                </div>
+                                <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+                                  Bạn có thể sửa mẫu chung và nội dung riêng theo từng topic trong phần chi tiết.
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsRejectConfigDrawerOpen(true);
+                                }}
+                                style={{ padding: '6px 10px', fontSize: '10px', borderRadius: '999px', whiteSpace: 'nowrap' }}
+                              >
+                                Mở phần chi tiết
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsRejectConfigDrawerOpen(true);
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                background: 'var(--bg-primary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '10px',
+                                padding: '12px',
+                                color: 'var(--color-text)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                                <strong style={{ fontSize: '12px' }}>Mẫu tin từ chối</strong>
+                                <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
+                                  {rejectTopicManagedCount > 0 ? `${rejectTopicCustomCount}/${rejectTopicManagedCount} topic riêng` : 'Mẫu chung'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                                {rejectCustomMessageInput || DEFAULT_REJECT_CUSTOM_MESSAGE}
+                              </div>
+                            </button>
+                          </div>,
                           { selectorId: 'reject' }
                         )}
                       </div>
                     ) : (
-                      <p className="node-text" style={{ fontWeight: '500' }}>
+                      <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {automation.rejectGroupId ? (
                           renderGroupTopicBadge(automation.rejectGroupId, automation.rejectThreadId)
                         ) : (
                           <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để cấu hình nhóm nhận tin từ chối.</span>
                         )}
-                      </p>
+                        {(automation.rejectCustomMessage || DEFAULT_REJECT_CUSTOM_MESSAGE) && (
+                          <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px 8px', fontSize: '10px', color: 'var(--color-text-muted)', whiteSpace: 'pre-wrap' }}>
+                            {automation.rejectCustomMessage || DEFAULT_REJECT_CUSTOM_MESSAGE}
+                          </div>
+                        )}
+                        {Array.isArray(automation.rejectTopicConfigs) && automation.rejectTopicConfigs.length > 0 && (
+                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
+                            Cấu hình riêng theo topic: {automation.rejectTopicConfigs.length} topic
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2813,6 +3028,15 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi tin cuối sang nhóm nghiệm thu.',
         () => setIsFinalConfigDrawerOpen(false),
         finalConfigPanel,
+        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
+      )}
+
+      {renderDrawerShell(
+        isRejectConfigDrawerOpen && editCard === 'reject',
+        'Tin nhắn thông báo từ chối',
+        'Bạn sửa mẫu tin chung và nội dung riêng theo từng topic nguồn ở đây.',
+        () => setIsRejectConfigDrawerOpen(false),
+        rejectConfigPanel,
         'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 

@@ -26,8 +26,10 @@ import {
   SourceMessageRecognitionConfig,
   ApprovalActionConfig,
   ApprovalTopicConfig,
+  RejectTopicConfig,
   DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   DEFAULT_APPROVAL_ACTION_CONFIG,
+  DEFAULT_REJECT_CUSTOM_MESSAGE,
   DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG,
 } from './database';
 
@@ -61,6 +63,8 @@ export interface ActiveListener {
   finalThreadId: number | null;
   rejectGroupId: string;
   rejectThreadId: number | null;
+  rejectCustomMessage: string;
+  rejectTopicConfigs: RejectTopicConfig[];
   forwardCount: number;
   lastForwardTime: number | null;
 }
@@ -212,6 +216,8 @@ export async function autoStartFromConfig(): Promise<void> {
           finalThreadId: setup.finalThreadId,
           rejectGroupId: setup.rejectGroupId,
           rejectThreadId: setup.rejectThreadId,
+          rejectCustomMessage: setup.rejectCustomMessage,
+          rejectTopicConfigs: setup.rejectTopicConfigs,
           forwardCount: setup.forwardCount,
           lastForwardTime: setup.lastForwardTime,
         });
@@ -460,7 +466,9 @@ async function handleBotUpdate(update: any) {
           }
 
           await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
-          const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
+          const sourceThreadId = normalizeThreadId(log.original_thread_id);
+          const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, sourceThreadId);
+          const rejectTopicConfig = resolveRejectTopicConfig(autoSetup, sourceThreadId);
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
           const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
 
@@ -477,7 +485,12 @@ async function handleBotUpdate(update: any) {
               step: 'approval',
             });
           }
-          const rejectText = `❌ *THÔNG BÁO TỪ CHỐI PHÊ DUYỆT*\n\nYêu cầu vật tư đã bị từ chối phê duyệt bởi ${userFullName}.\nNội dung: ${log.original_text || '[Media]'}`;
+          const rejectText = formatRejectCustomMessage(
+            rejectTopicConfig.rejectCustomMessage,
+            userFullName,
+            log.original_sender_name || '',
+            log.original_text || ''
+          );
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: rejectTarget.groupId,
             message_thread_id: rejectTarget.threadId || undefined,
@@ -1250,6 +1263,8 @@ export async function startListenerForAutomation(automationId: string): Promise<
     finalThreadId: setup.finalThreadId,
     rejectGroupId: setup.rejectGroupId,
     rejectThreadId: setup.rejectThreadId,
+    rejectCustomMessage: setup.rejectCustomMessage,
+    rejectTopicConfigs: setup.rejectTopicConfigs,
     forwardCount: setup.forwardCount,
     lastForwardTime: setup.lastForwardTime,
   });
@@ -1383,6 +1398,19 @@ function formatApprovalDecisionMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
 }
 
+function formatRejectCustomMessage(
+  template: string,
+  userFullName: string,
+  senderName: string,
+  originalText: string
+): string {
+  const base = (template || DEFAULT_REJECT_CUSTOM_MESSAGE).trim() || DEFAULT_REJECT_CUSTOM_MESSAGE;
+  return base
+    .replaceAll('{{userFullName}}', userFullName)
+    .replaceAll('{{senderName}}', senderName || 'Không rõ')
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
 function resolveApprovalActionConfig(autoSetup: any) {
   const cfg = autoSetup?.approvalActionConfig || {};
   return {
@@ -1430,6 +1458,29 @@ function resolveApprovalTopicConfig(autoSetup: any, sourceThreadId: number | nul
     approvalActionConfig: matched.approvalActionConfig
       ? resolveApprovalActionConfig({ approvalActionConfig: matched.approvalActionConfig })
       : base.approvalActionConfig,
+  };
+}
+
+function resolveRejectTopicConfig(autoSetup: any, sourceThreadId: number | null): {
+  rejectCustomMessage: string;
+} {
+  const base = {
+    rejectCustomMessage: typeof autoSetup?.rejectCustomMessage === 'string' && autoSetup.rejectCustomMessage.trim()
+      ? autoSetup.rejectCustomMessage.trim()
+      : DEFAULT_REJECT_CUSTOM_MESSAGE,
+  };
+
+  if (sourceThreadId === null || !Array.isArray(autoSetup?.rejectTopicConfigs)) {
+    return base;
+  }
+
+  const matched = autoSetup.rejectTopicConfigs.find((item: any) => normalizeThreadId(item?.sourceThreadId) === sourceThreadId);
+  if (!matched) return base;
+
+  return {
+    rejectCustomMessage: typeof matched.rejectCustomMessage === 'string' && matched.rejectCustomMessage.trim()
+      ? matched.rejectCustomMessage.trim()
+      : base.rejectCustomMessage,
   };
 }
 

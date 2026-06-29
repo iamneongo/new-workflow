@@ -23,6 +23,11 @@ export interface ApprovalTopicConfig {
   approvalActionConfig: ApprovalActionConfig;
 }
 
+export interface RejectTopicConfig {
+  sourceThreadId: number;
+  rejectCustomMessage: string;
+}
+
 export interface SupplierRoute {
   id: string;
   name: string;
@@ -38,6 +43,9 @@ export const DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG: SourceMessageRecognition
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 YÊU CẦU PHÊ DUYỆT\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
+
+export const DEFAULT_REJECT_CUSTOM_MESSAGE =
+  '❌ THÔNG BÁO TỪ CHỐI PHÊ DUYỆT\n\nNgười duyệt: {{userFullName}}\nNgười gửi yêu cầu: {{senderName}}\nNội dung gốc:\n{{originalText}}';
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
   hideAfterAction: false,
@@ -99,6 +107,8 @@ export interface AutomationSetup {
   finalThreadId: number | null;
   rejectGroupId: string;
   rejectThreadId: number | null;
+  rejectCustomMessage: string;
+  rejectTopicConfigs: RejectTopicConfig[];
   isListening: boolean;
   forwardCount: number;
   lastForwardTime: number | null;

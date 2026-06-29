@@ -109,6 +109,11 @@ export interface ApprovalTopicConfig {
   approvalActionConfig: ApprovalActionConfig;
 }
 
+export interface RejectTopicConfig {
+  sourceThreadId: number;
+  rejectCustomMessage: string;
+}
+
 export interface SupplierRoute {
   id: string;
   name: string;
@@ -199,6 +204,9 @@ export function normalizeSupplierRouteMode(value: unknown): SupplierRouteMode {
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 YÊU CẦU PHÊ DUYỆT\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
 
+export const DEFAULT_REJECT_CUSTOM_MESSAGE =
+  '❌ THÔNG BÁO TỪ CHỐI PHÊ DUYỆT\n\nNgười duyệt: {{userFullName}}\nNgười gửi yêu cầu: {{senderName}}\nNội dung gốc:\n{{originalText}}';
+
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
   hideAfterAction: false,
   agreeButtonLabel: '👍 Đồng ý',
@@ -235,6 +243,37 @@ export function normalizeThreadIds(value: unknown): number[] {
     .filter((item): item is number => item !== null);
 
   return Array.from(new Set(normalized));
+}
+
+export function normalizeRejectTopicConfigs(value: unknown): RejectTopicConfig[] {
+  if (value === null || value === undefined || value === '') return [];
+
+  let rawValues: unknown[] = [];
+  if (Array.isArray(value)) {
+    rawValues = value;
+  } else if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      rawValues = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      rawValues = [];
+    }
+  } else {
+    rawValues = [value];
+  }
+
+  return rawValues
+    .map((item: any) => {
+      const sourceThreadId = normalizeThreadId(item?.sourceThreadId);
+      if (sourceThreadId === null) return null;
+      return {
+        sourceThreadId,
+        rejectCustomMessage: typeof item?.rejectCustomMessage === 'string' && item.rejectCustomMessage.trim()
+          ? item.rejectCustomMessage.trim()
+          : DEFAULT_REJECT_CUSTOM_MESSAGE,
+      } satisfies RejectTopicConfig;
+    })
+    .filter((item): item is RejectTopicConfig => item !== null);
 }
 
 export function normalizeSourceMessageRecognitionConfig(value: unknown): SourceMessageRecognitionConfig {
@@ -352,6 +391,8 @@ export interface AutomationSetup {
   finalThreadId: number | null;
   rejectGroupId: string;
   rejectThreadId: number | null;
+  rejectCustomMessage: string;
+  rejectTopicConfigs: RejectTopicConfig[];
   isListening: boolean;
   forwardCount: number;
   lastForwardTime: number | null;
@@ -434,6 +475,8 @@ export async function ensureDatabase(): Promise<void> {
         final_thread_id INTEGER,
         reject_group_id VARCHAR(100),
         reject_thread_id INTEGER,
+        reject_custom_message TEXT,
+        reject_topic_configs JSONB,
         dest_group_id VARCHAR(100),
         is_listening BOOLEAN DEFAULT FALSE NOT NULL,
         forward_count INTEGER DEFAULT 0 NOT NULL,
@@ -471,6 +514,8 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS final_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_thread_id INTEGER',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_custom_message TEXT',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS reject_topic_configs JSONB',
       'ALTER TABLE chats ADD COLUMN IF NOT EXISTS photo_data TEXT',
       'ALTER TABLE chats ADD COLUMN IF NOT EXISTS photo_mime VARCHAR(100)'
     ];
@@ -552,6 +597,13 @@ export async function ensureDatabase(): Promise<void> {
       SET approval_topic_configs = COALESCE(approval_topic_configs, '[]'::jsonb)
       WHERE approval_topic_configs IS NULL
     `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET reject_custom_message = COALESCE(reject_custom_message, $1),
+          reject_topic_configs = COALESCE(reject_topic_configs, '[]'::jsonb)
+      WHERE reject_custom_message IS NULL OR reject_topic_configs IS NULL
+    `, [DEFAULT_REJECT_CUSTOM_MESSAGE]);
 
     await client.query(`
       UPDATE automation_setups
@@ -876,6 +928,8 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   finalThreadId: null,
   rejectGroupId: '',
   rejectThreadId: null,
+  rejectCustomMessage: DEFAULT_REJECT_CUSTOM_MESSAGE,
+  rejectTopicConfigs: [],
   isListening: false,
   forwardCount: 0,
   lastForwardTime: null,
@@ -926,6 +980,8 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         finalThreadId: normalizeThreadId(row.final_thread_id),
         rejectGroupId: row.reject_group_id || '',
         rejectThreadId: normalizeThreadId(row.reject_thread_id),
+        rejectCustomMessage: row.reject_custom_message || DEFAULT_REJECT_CUSTOM_MESSAGE,
+        rejectTopicConfigs: normalizeRejectTopicConfigs(row.reject_topic_configs),
         isListening: row.is_listening,
         forwardCount: row.forward_count,
         lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
@@ -983,6 +1039,8 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       finalThreadId: normalizeThreadId(row.final_thread_id),
       rejectGroupId: row.reject_group_id || '',
       rejectThreadId: normalizeThreadId(row.reject_thread_id),
+      rejectCustomMessage: row.reject_custom_message || DEFAULT_REJECT_CUSTOM_MESSAGE,
+      rejectTopicConfigs: normalizeRejectTopicConfigs(row.reject_topic_configs),
       isListening: row.is_listening,
       forwardCount: row.forward_count,
       lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,
@@ -1077,6 +1135,12 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         : current.finalMessageMode,
       finalThreadId: hasField('finalThreadId') ? normalizeThreadId(setup.finalThreadId) : current.finalThreadId,
       rejectThreadId: hasField('rejectThreadId') ? normalizeThreadId(setup.rejectThreadId) : current.rejectThreadId,
+      rejectCustomMessage: hasField('rejectCustomMessage')
+        ? (typeof setup.rejectCustomMessage === 'string' ? setup.rejectCustomMessage : String(setup.rejectCustomMessage ?? ''))
+        : current.rejectCustomMessage,
+      rejectTopicConfigs: hasField('rejectTopicConfigs')
+        ? normalizeRejectTopicConfigs(setup.rejectTopicConfigs)
+        : current.rejectTopicConfigs,
     };
 
     await p.query(`
@@ -1086,10 +1150,10 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         supply_group_id, supply_thread_id, supplier_selection_hide_after_action, supply_prompt_hide_after_action, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
         final_group_id, final_thread_id,
-        reject_group_id, reject_thread_id,
+        reject_group_id, reject_thread_id, reject_custom_message, reject_topic_configs,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         sort_order = EXCLUDED.sort_order,
@@ -1121,6 +1185,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         final_thread_id = EXCLUDED.final_thread_id,
         reject_group_id = EXCLUDED.reject_group_id,
         reject_thread_id = EXCLUDED.reject_thread_id,
+        reject_custom_message = EXCLUDED.reject_custom_message,
+        reject_topic_configs = EXCLUDED.reject_topic_configs,
         is_listening = EXCLUDED.is_listening,
         forward_count = EXCLUDED.forward_count,
         last_forward_time = EXCLUDED.last_forward_time,
@@ -1157,6 +1223,8 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.finalThreadId,
       updated.rejectGroupId,
       updated.rejectThreadId,
+      updated.rejectCustomMessage,
+      JSON.stringify(updated.rejectTopicConfigs),
       updated.isListening,
       updated.forwardCount,
       updated.lastForwardTime,
@@ -1228,6 +1296,8 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         finalThreadId: normalizeThreadId(row.final_thread_id),
         rejectGroupId: row.reject_group_id || '',
         rejectThreadId: normalizeThreadId(row.reject_thread_id),
+        rejectCustomMessage: row.reject_custom_message || DEFAULT_REJECT_CUSTOM_MESSAGE,
+        rejectTopicConfigs: normalizeRejectTopicConfigs(row.reject_topic_configs),
         isListening: row.is_listening,
         forwardCount: row.forward_count,
         lastForwardTime: row.last_forward_time ? Number(row.last_forward_time) : null,

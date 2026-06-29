@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       deliveryGroupId, deliveryThreadId,
       finalMessageMode,
       finalGroupId, finalThreadId,
-      rejectGroupId, rejectThreadId,
+      rejectGroupId, rejectThreadId, rejectCustomMessage, rejectTopicConfigs,
       restartIfListening = true,
     } = body;
 
@@ -99,6 +99,8 @@ export async function POST(req: NextRequest) {
     if (finalThreadId !== undefined) updates.finalThreadId = normalizeThreadId(finalThreadId);
     if (rejectGroupId !== undefined) updates.rejectGroupId = rejectGroupId;
     if (rejectThreadId !== undefined) updates.rejectThreadId = normalizeThreadId(rejectThreadId);
+    if (rejectCustomMessage !== undefined) updates.rejectCustomMessage = rejectCustomMessage;
+    if (rejectTopicConfigs !== undefined) updates.rejectTopicConfigs = rejectTopicConfigs;
     
     // Maintain destGroupId for compatibility
     if (supplyGroupId !== undefined) updates.destGroupId = supplyGroupId;
