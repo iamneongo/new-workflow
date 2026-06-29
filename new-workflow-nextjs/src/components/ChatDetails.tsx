@@ -1905,6 +1905,7 @@ export default function ChatDetails({
 
                       <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
                         <input
+                          id="tour-source-recognition-enabled"
                           type="checkbox"
                           checked={sourceMessageRecognitionEnabledInput}
                           onChange={(e) => setSourceMessageRecognitionEnabledInput(e.target.checked)}
@@ -1915,6 +1916,7 @@ export default function ChatDetails({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Các dấu hiệu bắt buộc</label>
                         <textarea
+                          id="tour-source-recognition-keywords"
                           value={sourceMessageRecognitionKeywordsInput}
                           onChange={(e) => setSourceMessageRecognitionKeywordsInput(e.target.value)}
                           rows={3}
@@ -2784,7 +2786,7 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi tin, sửa lời nhắn mở đầu, đổi tên nút và đổi câu trả lời sau khi duyệt.',
         () => setIsApprovalMessageDrawerOpen(false),
         approvalMessageConfigPanel,
-        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 2.'
+        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 
       {renderDrawerShell(
@@ -2793,7 +2795,7 @@ export default function ChatDetails({
         'Bạn thêm nhà cung ứng, chọn nơi nhận và chọn nơi bot sẽ theo dõi phản hồi ở bước 3.',
         () => setIsSupplyConfigDrawerOpen(false),
         renderSupplyConfigPanel(),
-        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 3.'
+        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 
       {renderDrawerShell(
@@ -2802,7 +2804,7 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi lại phản hồi đổi vật tư.',
         () => setIsSupplyChangeDrawerOpen(false),
         supplyChangeConfigPanel,
-        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở node này.'
+        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 
       {renderDrawerShell(
@@ -2811,7 +2813,7 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi tin cuối sang nhóm nghiệm thu.',
         () => setIsFinalConfigDrawerOpen(false),
         finalConfigPanel,
-        'Bạn chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 5.'
+        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 
       {isApprovalTopicDrawerOpen && editCard === 'approval' && (
@@ -2845,7 +2847,7 @@ export default function ChatDetails({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <strong style={{ fontSize: '16px', color: 'var(--color-text)' }}>Cấu hình riêng theo topic nguồn</strong>
                 <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.55 }}>
-                  Chỉnh từng topic ở đây để bước 2 gọn và dễ nhìn hơn. Các thay đổi chỉ được áp dụng khi bạn bấm Lưu ở bước 2.
+                  Chỉnh từng topic ở đây để phần duyệt gọn và dễ nhìn hơn. Bấm Xong là hệ thống lưu ngay.
                 </span>
               </div>
               <button
@@ -2873,7 +2875,7 @@ export default function ChatDetails({
 
             <div style={{ padding: '14px 18px 18px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                Mẹo: chỉnh xong ở đây rồi quay lại bấm Lưu ở bước 2 để bot dùng cấu hình mới.
+                Bấm Xong là hệ thống lưu ngay cấu hình theo topic này.
               </span>
               <button
                 type="button"

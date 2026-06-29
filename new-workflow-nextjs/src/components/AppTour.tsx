@@ -24,7 +24,7 @@ type TourStep = {
   disableActiveInteraction?: boolean;
 };
 
-const TOUR_SEEN_KEY = 'telegram-bot-tracker-tour-seen-v1';
+const TOUR_SEEN_KEY = 'telegram-bot-tracker-tour-seen-v2';
 
 export default function AppTour({
   selectedAutomationId,
@@ -64,7 +64,7 @@ export default function AppTour({
     pushStep(steps, '#appBrand', {
       popover: {
         title: 'Bảng điều khiển',
-        description: 'Đây là màn hình chính. Bạn tạo automation, đồng bộ dữ liệu và xem log ở đây.',
+        description: 'Bạn sẽ làm hầu hết mọi việc ở đây: tạo quy trình, chọn nhóm, bật bot và xem log khi cần kiểm tra.',
         side: 'bottom',
         align: 'start',
       },
@@ -73,7 +73,7 @@ export default function AppTour({
     pushStep(steps, '#btnBotConfig', {
       popover: {
         title: 'Token bot',
-        description: 'Nhập token ở đây. Không có token thì bot không chạy.',
+        description: 'Bạn dán token bot vào đây. Nếu chưa có token, các bước phía sau vẫn xem được nhưng bot chưa thể chạy.',
         side: 'bottom',
         align: 'start',
       },
@@ -82,7 +82,7 @@ export default function AppTour({
     pushStep(steps, '#btnSync', {
       popover: {
         title: 'Đồng bộ',
-        description: 'Bấm khi bạn muốn kéo lại nhóm, chủ đề, và dữ liệu Telegram mới nhất.',
+        description: 'Bấm khi bạn vừa thêm nhóm mới, đổi tên topic, hoặc muốn tải lại dữ liệu Telegram mới nhất.',
         side: 'bottom',
         align: 'start',
       },
@@ -91,7 +91,7 @@ export default function AppTour({
     pushStep(steps, '#btnLogout', {
       popover: {
         title: 'Đăng xuất',
-        description: 'Xóa session hiện tại và buộc đăng nhập lại từ đầu.',
+        description: 'Dùng khi bạn muốn đăng nhập lại tài khoản Telegram từ đầu.',
         side: 'bottom',
         align: 'start',
       },
@@ -100,7 +100,7 @@ export default function AppTour({
     pushStep(steps, '#runtimeLogToggle', {
       popover: {
         title: 'Runtime log',
-        description: 'Bấm để mở phần log khi muốn xem bot đang dừng ở đâu, có lỗi gì hoặc xử lý chậm ở bước nào.',
+        description: 'Mở phần này khi bạn muốn biết bot đang làm tới đâu, có lỗi gì, hay đang dừng ở bước nào.',
         side: 'bottom',
         align: 'start',
       },
@@ -109,7 +109,7 @@ export default function AppTour({
     pushStep(steps, '#createAutomationButton', {
       popover: {
         title: 'Tạo automation',
-        description: 'Mỗi công trình nên có một automation riêng.',
+        description: 'Mỗi công trình hoặc mỗi luồng làm việc nên có một automation riêng để dễ quản lý.',
         side: 'right',
         align: 'start',
       },
@@ -118,7 +118,7 @@ export default function AppTour({
     pushStep(steps, '#searchInput', {
       popover: {
         title: 'Tìm nhanh',
-        description: 'Gõ tên công trình để lọc automation trong danh sách.',
+        description: 'Gõ vài chữ để tìm nhanh automation bạn cần mở.',
         side: 'right',
         align: 'start',
       },
@@ -128,7 +128,7 @@ export default function AppTour({
       pushStep(steps, '#automationList', {
         popover: {
           title: 'Danh sách automation',
-          description: 'Chọn một automation ở đây để đi tiếp phần cấu hình.',
+          description: 'Chọn một automation trong danh sách để mở phần cấu hình chi tiết ở bên phải.',
           side: 'right',
           align: 'start',
           showButtons: ['close'],
@@ -139,7 +139,7 @@ export default function AppTour({
     pushStep(steps, '#detailsSection', {
       popover: {
         title: 'Khu cấu hình',
-        description: 'Phần này sẽ hiện tên automation, nút chạy, và toàn bộ sơ đồ.',
+        description: 'Khu này hiển thị tên automation, nút bật bot và toàn bộ các bước trong quy trình.',
         side: 'left',
         align: 'start',
       },
@@ -154,7 +154,7 @@ export default function AppTour({
     pushStep(steps, '#detailsSection', {
       popover: {
         title: 'Khu cấu hình',
-        description: 'Đây là nơi bạn chỉnh từng node. Mỗi node đều bấm được, không phải chỉ để xem.',
+        description: 'Bạn bấm vào từng node ở đây để chỉnh cấu hình. Mỗi node là một bước thật trong quy trình.',
         side: 'left',
         align: 'start',
       },
@@ -163,7 +163,7 @@ export default function AppTour({
     pushStep(steps, '#tour-automation-name', {
       popover: {
         title: 'Đổi tên',
-        description: 'Đặt tên theo công trình để khỏi nhầm khi có nhiều automation chạy song song.',
+        description: 'Đặt tên rõ ràng theo công trình hoặc mục đích để sau này nhìn vào là biết ngay.',
         side: 'bottom',
         align: 'start',
       },
@@ -172,7 +172,7 @@ export default function AppTour({
     pushStep(steps, '#tour-listener-toggle', {
       popover: {
         title: 'Bật bot theo dõi',
-        description: 'Chỉ bật khi token bot và nhóm nguồn đã xong. Nếu chưa đủ, bot sẽ không bắt đầu nghe tin.',
+        description: 'Khi các bước cơ bản đã xong, bạn bấm nút này để bot bắt đầu nghe tin nhắn mới.',
         side: 'bottom',
         align: 'start',
       },
@@ -181,7 +181,7 @@ export default function AppTour({
     pushStep(steps, '#tour-workflow-canvas', {
       popover: {
         title: 'Sơ đồ quy trình',
-        description: 'Kéo để di chuyển, zoom để nhìn rõ hơn, rồi bấm từng node để mở phần cấu hình chi tiết.',
+        description: 'Bạn có thể kéo để xem toàn sơ đồ, phóng to hoặc thu nhỏ, rồi bấm vào từng bước để chỉnh.',
         side: 'left',
         align: 'start',
       },
@@ -190,7 +190,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-source', {
       popover: {
         title: 'Bước 1: Nhóm nguồn',
-        description: 'Node này quyết định bot sẽ nghe ở đâu. Bấm vào để chọn nhóm nguồn và những chủ đề cần theo dõi.',
+        description: 'Bước này chọn nơi bot sẽ nghe tin nhắn đầu vào. Bạn chọn đúng nhóm và đúng topic ngay từ đây.',
         side: 'right',
         align: 'start',
       },
@@ -199,7 +199,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-approval', {
       popover: {
         title: 'Bước 2: Gửi sang nhóm duyệt',
-        description: 'Node này chuyển tin sang nhóm duyệt. Tại đây bạn chọn nhóm, chủ đề, và cách gửi tin gốc.',
+        description: 'Bước này gửi tin sang nhóm duyệt. Bạn chọn nơi nhận và cách bot gửi nội dung gốc sang đó.',
         side: 'right',
         align: 'start',
       },
@@ -208,7 +208,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-reject', {
       popover: {
         title: 'Nhánh từ chối',
-        description: 'Nhánh này dùng khi không đồng ý ở bước phê duyệt. Nó báo trạng thái sang nhóm đã chọn.',
+        description: 'Nếu người duyệt bấm không đồng ý, bot sẽ đi theo nhánh này để báo lại đúng nơi bạn đã chọn.',
         side: 'right',
         align: 'start',
       },
@@ -217,7 +217,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-supply', {
       popover: {
         title: 'Bước 3: Chọn nhà cung ứng',
-        description: 'Đây là nhánh hỏi nhà cung ứng. Ngoài nhóm nhận tin chính, bạn còn thêm từng nhà cung ứng ở bên dưới.',
+        description: 'Bước này dùng để chọn nhà cung ứng. Bạn có thể tạo nhiều nhà cung ứng và gắn từng bên vào đúng nhóm riêng.',
         side: 'right',
         align: 'start',
       },
@@ -226,7 +226,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-supply-change', {
       popover: {
         title: 'Nhánh báo đổi vật tư',
-        description: 'Nếu nhà cung ứng không đồng ý hoặc muốn đổi vật tư, bot sẽ đi theo nhánh này để báo lại đúng nhóm bạn đã chọn.',
+        description: 'Nếu nhà cung ứng muốn đổi vật tư hoặc không thể cấp đúng hàng, bot sẽ báo lại qua nhánh này.',
         side: 'right',
         align: 'start',
       },
@@ -234,7 +234,7 @@ export default function AppTour({
     pushStep(steps, '#tour-supply-change-editor', {
       popover: {
         title: 'Chọn nơi nhận báo đổi',
-        description: 'Chọn nhóm và chủ đề sẽ nhận thông báo đổi vật tư, rồi chọn cách gửi lại nội dung.',
+        description: 'Bạn chọn nơi sẽ nhận tin báo đổi vật tư, rồi chọn kiểu gửi lại nội dung để người xem dễ theo dõi.',
         side: 'top',
         align: 'start',
       },
@@ -242,7 +242,7 @@ export default function AppTour({
     pushStep(steps, '#tour-supply-change-message-mode', {
       popover: {
         title: 'Chọn cách gửi',
-        description: 'Chọn gửi nguyên nếu muốn giữ nguyên tin gốc. Chọn sao chép nếu tin có ảnh, file, hoặc bạn muốn tạo một tin mới cho nhóm nhận.',
+        description: 'Gửi nguyên sẽ giữ mạch tin như cũ. Sao chép hợp hơn khi tin có ảnh, file, hoặc bạn muốn tạo một tin mới rõ ràng hơn.',
         side: 'top',
         align: 'start',
       },
@@ -251,7 +251,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-delivery', {
       popover: {
         title: 'Bước 4: Báo đã nhận vật tư',
-        description: 'Node này nhắc mọi người khi vật tư đang về công trình và chờ reply ngay trên tin nhắn đó.',
+        description: 'Bước này gửi tin báo hàng đang về và chờ người ở công trình reply lại khi đã nhận.',
         side: 'right',
         align: 'start',
       },
@@ -260,7 +260,7 @@ export default function AppTour({
     pushStep(steps, '#tour-node-final', {
       popover: {
         title: 'Bước 5: Chốt nghiệm thu',
-        description: 'Node cuối chốt quy trình, gửi phản hồi nghiệm thu sang nơi bạn đã chọn và ghi nhận số lượt xử lý.',
+        description: 'Đây là bước cuối. Bot sẽ gửi phần xác nhận nghiệm thu sang nơi bạn đã chọn.',
         side: 'right',
         align: 'start',
       },
@@ -276,7 +276,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-source', {
         popover: {
           title: 'Bước 1: Nhóm nguồn',
-          description: 'Chọn đúng nhóm nguồn là đủ để bot bắt đầu nghe. Nếu muốn theo dõi nhiều chủ đề, hãy tick nhiều mục cùng lúc.',
+          description: 'Bạn chọn đúng nhóm ở đây để bot nghe đúng chỗ. Nếu nhóm có nhiều topic, bạn có thể chọn một hoặc nhiều topic cùng lúc.',
           side: 'right',
           align: 'start',
         },
@@ -284,7 +284,23 @@ export default function AppTour({
       pushStep(steps, '#tour-source-editor', {
         popover: {
           title: 'Cách dùng node nguồn',
-          description: 'Bấm vào ô nhóm để chọn nhóm hoặc kênh Telegram. Sau đó chọn một hoặc nhiều chủ đề. Nếu để trống chủ đề, bot sẽ nghe toàn bộ nhóm. Xong thì bấm Lưu.',
+          description: 'Bạn chọn nhóm trước, rồi chọn topic nếu cần. Nếu để trống phần topic, bot sẽ nghe toàn bộ nhóm. Phần nâng cao bên dưới giúp bot chỉ nhận những tin đúng mẫu như CT, Buổi, HM.',
+          side: 'top',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-source-recognition-enabled', {
+        popover: {
+          title: 'Bật lọc tin đúng mẫu',
+          description: 'Bạn bật mục này khi chỉ muốn bot nhận những tin đúng mẫu của đội mình. Cách này giúp bot bớt nghe nhầm các tin trò chuyện thông thường.',
+          side: 'top',
+          align: 'start',
+        },
+      });
+      pushStep(steps, '#tour-source-recognition-keywords', {
+        popover: {
+          title: 'Nhập dấu hiệu nhận dạng',
+          description: 'Bạn nhập các chữ mà tin bắt buộc phải có, ví dụ CT, Buổi, HM. Khi một tin thiếu một trong các chữ này, bot sẽ bỏ qua.',
           side: 'top',
           align: 'start',
         },
@@ -292,7 +308,7 @@ export default function AppTour({
       pushStep(steps, '#tour-topic-multi-source', {
         popover: {
         title: 'Chọn nhiều chủ đề',
-        description: 'Tick từng chủ đề bạn muốn nghe. Nút “Chọn tất cả” sẽ bật hết chủ đề trong nhóm, còn “Bỏ chọn” sẽ xóa sạch lựa chọn.',
+        description: 'Bạn tick vào những topic muốn nghe. Chọn tất cả sẽ bật hết. Bỏ chọn sẽ xóa hết lựa chọn hiện tại.',
           side: 'top',
           align: 'start',
         },
@@ -303,7 +319,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-approval', {
         popover: {
           title: 'Bước 2: Gửi sang nhóm duyệt',
-          description: 'Node này đẩy nội dung sang nhóm duyệt kèm nút xử lý. Đây là chỗ người dùng bấm Đồng ý hoặc Không đồng ý.',
+          description: 'Bot sẽ gửi tin sang nhóm duyệt ở bước này. Người nhận sẽ bấm Đồng ý hoặc Không đồng ý ngay trên tin.',
           side: 'right',
           align: 'start',
         },
@@ -311,7 +327,7 @@ export default function AppTour({
       pushStep(steps, '#tour-approval-editor', {
         popover: {
           title: 'Cách dùng node duyệt',
-          description: 'Chọn nhóm và chủ đề nhận tin, rồi chọn cách gửi: forward giữ nguyên tin gốc, copy sẽ sao chép nguyên nội dung và media. Cuối cùng sửa lời nhắn nếu muốn.',
+          description: 'Bạn chọn nơi nhận tin duyệt, chọn cách gửi, rồi chỉnh lời nhắn và nút bấm nếu muốn. Những phần mở rộng như tin nhắn mẫu hay cấu hình theo topic đều nằm trong phần chi tiết.',
           side: 'top',
           align: 'start',
         },
@@ -319,7 +335,7 @@ export default function AppTour({
       pushStep(steps, '#tour-approval-message-mode', {
         popover: {
           title: 'Forward hay copy',
-          description: 'Chọn forward nếu muốn giữ nguyên luồng gốc. Chọn copy nếu tin có ảnh, file, hoặc bạn muốn gửi lại như một tin mới.',
+          description: 'Gửi nguyên giữ cảm giác như đang xem đúng tin gốc. Sao chép hợp hơn khi bạn muốn nhóm nhận thấy đó là một tin mới, đủ nội dung, dễ xử lý.',
           side: 'top',
           align: 'start',
         },
@@ -327,7 +343,7 @@ export default function AppTour({
       pushStep(steps, '#tour-approval-custom-message', {
         popover: {
           title: 'Lời nhắn thêm',
-          description: 'Đây là đoạn nhắn thêm lên đầu tin duyệt để người đọc hiểu cần làm gì. Có thể giữ mẫu mặc định hoặc viết ngắn gọn theo cách làm của bạn.',
+          description: 'Đây là dòng mở đầu để người duyệt nhìn vào là hiểu phải làm gì. Bạn nên viết ngắn, rõ, đúng cách gọi quen thuộc của đội mình.',
           side: 'top',
           align: 'start',
         },
@@ -338,7 +354,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-reject', {
         popover: {
           title: 'Nhánh từ chối',
-          description: 'Dùng cho trường hợp không đồng ý ở bước duyệt sơ bộ. Nó chỉ báo về nhóm đã chọn, không đi tiếp sang nhà cung ứng.',
+          description: 'Nhánh này chỉ chạy khi người duyệt từ chối. Bot sẽ dừng quy trình và báo lại đúng nhóm bạn đã cài.',
           side: 'right',
           align: 'start',
         },
@@ -346,7 +362,7 @@ export default function AppTour({
       pushStep(steps, '#tour-reject-editor', {
         popover: {
           title: 'Cách dùng nhánh từ chối',
-          description: 'Chọn nhóm và chủ đề nhận thông báo từ chối. Nếu nhóm có chủ đề, bạn nên chỉ định rõ để tránh tin rơi vào sai chỗ.',
+          description: 'Bạn chọn nơi sẽ nhận tin báo từ chối. Nếu nhóm có topic, nên chọn sẵn để tin không rơi sai chỗ.',
           side: 'top',
           align: 'start',
         },
@@ -357,7 +373,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-supply', {
         popover: {
           title: 'Bước 3: Chọn nhà cung ứng',
-          description: 'Đây là node hỏi phương án cung cấp. Ngoài nhóm nhận tin chính, nó còn giữ danh sách nhà cung ứng cho từng công trình.',
+          description: 'Đây là bước bot hỏi nhà cung ứng. Bạn có thể gắn nhiều nhà cung ứng khác nhau cho cùng một công trình.',
           side: 'right',
           align: 'start',
         },
@@ -365,7 +381,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supply-editor', {
         popover: {
           title: 'Cách dùng node vật tư',
-          description: 'Chọn nhóm nhận câu hỏi vật tư trước. Nếu công trình có nhiều nhà cung ứng, thêm từng nhà cung ứng ở phần bên dưới rồi chọn nhóm, chủ đề và cách gửi cho từng bên.',
+          description: 'Bạn chọn nơi bot theo dõi phản hồi của bước này, rồi thêm từng nhà cung ứng bên dưới. Mỗi nhà cung ứng có thể đi vào một nhóm hoặc một topic riêng.',
           side: 'top',
           align: 'start',
         },
@@ -373,7 +389,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supplier-route-1', {
         popover: {
           title: 'Nhà cung ứng đầu tiên',
-          description: 'Trong từng thẻ, bạn đặt tên dễ nhớ, chọn nhóm và chủ đề nhận tin, rồi quyết định gửi nguyên hay sao chép. Làm xong thì bấm Lưu.',
+          description: 'Mỗi thẻ là một nhà cung ứng. Bạn đặt tên dễ nhớ, chọn nơi nhận tin, rồi chọn kiểu gửi nội dung cho bên đó.',
           side: 'top',
           align: 'start',
         },
@@ -381,7 +397,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supplier-route-name-1', {
         popover: {
           title: 'Đặt tên nhà cung ứng',
-          description: 'Đặt một cái tên ngắn gọn, dễ nhìn để sau này biết ngay đây là bên nào.',
+          description: 'Bạn đặt tên quen thuộc để khi nhìn vào danh sách là biết ngay đây là bên nào.',
           side: 'top',
           align: 'start',
         },
@@ -389,7 +405,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supplier-route-mode-1', {
         popover: {
           title: 'Chọn cách gửi',
-          description: 'Chọn gửi nguyên nếu muốn giữ nguyên nội dung gốc. Chọn sao chép nếu muốn tin gửi sang bên nhà cung ứng trông như một tin mới.',
+          description: 'Gửi nguyên hợp khi bạn muốn giữ mạch tin cũ. Sao chép hợp khi bạn muốn bên nhà cung ứng nhận một tin mới, rõ ràng hơn.',
           side: 'top',
           align: 'start',
         },
@@ -397,7 +413,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supplier-routes-section', {
         popover: {
           title: 'Danh sách nhà cung ứng',
-          description: 'Mỗi nhà cung ứng là một đường gửi riêng. Bấm “Thêm nhà cung ứng”, đặt tên dễ nhớ, rồi gắn nhóm và chủ đề nhận tin cho đúng bên.',
+          description: 'Phần này quản lý toàn bộ danh sách nhà cung ứng của automation. Bạn thêm, sửa, đổi thứ tự hay xóa từng bên ngay tại đây.',
           side: 'top',
           align: 'start',
         },
@@ -405,7 +421,7 @@ export default function AppTour({
       pushStep(steps, '#tour-add-supplier-route', {
         popover: {
           title: 'Thêm nhà cung ứng',
-          description: 'Dùng nút này khi công trình có hơn một nhà cung ứng. Mỗi nhà cung ứng có thể gửi bằng gửi nguyên hoặc sao chép tùy cách bạn muốn giữ nội dung.',
+          description: 'Khi công trình có thêm nhà cung ứng mới, bạn bấm nút này để thêm một dòng mới rồi điền thông tin cho bên đó.',
           side: 'left',
           align: 'start',
         },
@@ -416,7 +432,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-supply-change', {
         popover: {
           title: 'Nhánh báo đổi vật tư',
-          description: 'Node này dùng khi nhà cung ứng muốn đổi vật tư. Bấm vào để chọn nhóm nhận thông báo, rồi quyết định gửi nguyên hay sao chép.',
+          description: 'Bước này xử lý trường hợp nhà cung ứng muốn đổi vật tư. Bot sẽ gom phản hồi và báo lại về nơi bạn đã cài.',
           side: 'right',
           align: 'start',
         },
@@ -424,7 +440,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supply-change-editor', {
         popover: {
           title: 'Cách dùng nhánh đổi vật tư',
-          description: 'Chọn nhóm và chủ đề sẽ nhận thông báo đổi vật tư. Nếu bạn để đúng topic theo công trình, người xem sẽ biết cần xử lý ở đâu.',
+          description: 'Bạn chọn nơi sẽ nhận tin báo đổi vật tư. Đặt đúng topic theo công trình sẽ giúp người xem xử lý nhanh hơn.',
           side: 'top',
           align: 'start',
         },
@@ -432,7 +448,7 @@ export default function AppTour({
       pushStep(steps, '#tour-supply-change-message-mode', {
         popover: {
           title: 'Chọn cách gửi',
-          description: 'Chọn gửi nguyên nếu muốn giữ nguyên tin gốc. Chọn sao chép nếu tin có ảnh, file, hoặc bạn muốn tạo một tin mới cho nhóm nhận.',
+          description: 'Gửi nguyên sẽ bám theo mạch tin cũ. Sao chép sẽ tạo một tin mới rõ ràng hơn cho nhóm nhận.',
           side: 'top',
           align: 'start',
         },
@@ -443,7 +459,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-delivery', {
         popover: {
           title: 'Bước 4: Báo đã nhận vật tư',
-          description: 'Node này dùng khi vật tư đã được chở về công trình. Hệ thống sẽ gửi thông báo và chờ người dùng reply trực tiếp vào tin đó.',
+          description: 'Bước này dùng lúc hàng đã về công trình. Bot sẽ gửi một tin báo nhận hàng và chờ người dùng reply lại ngay trên tin đó.',
           side: 'right',
           align: 'start',
         },
@@ -451,7 +467,7 @@ export default function AppTour({
       pushStep(steps, '#tour-delivery-editor', {
         popover: {
           title: 'Cách dùng node giao nhận',
-          description: 'Chọn nhóm và chủ đề sẽ nhận thông báo giao hàng. Nên để đúng chủ đề theo công trình để khi reply, bot biết phải ghi nhận vào đâu.',
+          description: 'Bạn chọn nơi sẽ nhận tin báo giao hàng. Chọn đúng topic sẽ giúp bot hiểu reply đó thuộc công trình nào.',
           side: 'top',
           align: 'start',
         },
@@ -462,7 +478,7 @@ export default function AppTour({
       pushStep(steps, '#tour-node-final', {
         popover: {
           title: 'Bước 5: Chốt nghiệm thu',
-          description: 'Đây là node chốt cuối. Khi có reply nghiệm thu, bot sẽ gửi phản hồi sang nơi bạn đã cấu hình.',
+          description: 'Đây là bước chốt cuối của quy trình. Khi có reply nghiệm thu, bot sẽ gửi tiếp sang nơi bạn đã chọn.',
           side: 'right',
           align: 'start',
         },
@@ -470,7 +486,7 @@ export default function AppTour({
       pushStep(steps, '#tour-final-editor', {
         popover: {
           title: 'Cách dùng node nghiệm thu',
-          description: 'Chọn nhóm và chủ đề nhận kết quả cuối, rồi quyết định gửi bằng gửi nguyên hay sao chép. Nếu cần nhắn khác cho từng công trình, sửa lời nhắn ở đây trước khi lưu.',
+          description: 'Bạn chọn nơi nhận kết quả cuối, rồi chọn kiểu gửi cho phù hợp. Nếu đội bạn cần cách viết riêng, bạn chỉnh phần tin nhắn ngay trong bước này.',
           side: 'top',
           align: 'start',
         },
@@ -478,7 +494,7 @@ export default function AppTour({
       pushStep(steps, '#tour-final-message-mode', {
         popover: {
           title: 'Kiểu gửi kết quả cuối',
-          description: 'Forward giữ nguyên reply gốc. Copy hữu ích nếu nội dung có ảnh, file hoặc bạn muốn gửi như một tin mới.',
+          description: 'Gửi nguyên giữ nguyên reply gốc. Sao chép hợp khi reply có ảnh, file hoặc bạn muốn nhóm nhận thấy đó là một tin mới.',
           side: 'top',
           align: 'start',
         },
@@ -488,7 +504,7 @@ export default function AppTour({
     pushStep(steps, `#tour-selector-actions-${node}`, {
       popover: {
         title: 'Lưu lại',
-        description: 'Sau khi chỉnh xong, bấm Lưu để hệ thống ghi nhớ thay đổi. Nếu bot đang chạy, nó sẽ tự nạp lại cấu hình mới.',
+        description: 'Sau khi chỉnh xong, bạn bấm Lưu để hệ thống ghi nhớ thay đổi. Nếu bot đang chạy, hệ thống sẽ tự nạp lại cấu hình mới.',
         side: 'top',
         align: 'start',
       },
