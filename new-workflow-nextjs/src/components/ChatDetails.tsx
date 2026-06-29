@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig } from '@/lib/automation-types';
-import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG } from '@/lib/automation-types';
+import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
@@ -43,6 +43,15 @@ function formatTime(ts: number | null): string {
     + ' ' + d.toLocaleDateString('vi-VN');
 }
 
+function parseRecognitionKeywords(value: string): string[] {
+  const keywords = value
+    .split(/[\n,;|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(keywords));
+}
+
 export default function ChatDetails({
   automation: automationProp,
   onDeleteAutomation,
@@ -78,6 +87,10 @@ export default function ChatDetails({
   
   const [sourceGroupIdInput, setSourceGroupIdInput] = useState('');
   const [sourceThreadIdsInput, setSourceThreadIdsInput] = useState<number[]>([]);
+  const [sourceMessageRecognitionEnabledInput, setSourceMessageRecognitionEnabledInput] = useState(DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.enabled);
+  const [sourceMessageRecognitionKeywordsInput, setSourceMessageRecognitionKeywordsInput] = useState(
+    DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords.join(', ')
+  );
 
   const [approvalGroupIdInput, setApprovalGroupIdInput] = useState('');
   const [approvalThreadIdInput, setApprovalThreadIdInput] = useState<number | ''>('');
@@ -208,6 +221,12 @@ export default function ChatDetails({
         : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
           ? [automation.sourceThreadId]
           : []);
+      setSourceMessageRecognitionEnabledInput(automation.sourceMessageRecognitionConfig?.enabled !== false);
+      setSourceMessageRecognitionKeywordsInput(
+        Array.isArray(automation.sourceMessageRecognitionConfig?.requiredKeywords) && automation.sourceMessageRecognitionConfig.requiredKeywords.length > 0
+          ? automation.sourceMessageRecognitionConfig.requiredKeywords.join(', ')
+          : DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords.join(', ')
+      );
 
       setApprovalGroupIdInput(automation.approvalGroupId || '');
       setApprovalThreadIdInput(automation.approvalThreadId !== null && automation.approvalThreadId !== undefined ? automation.approvalThreadId : '');
@@ -413,6 +432,10 @@ export default function ChatDetails({
         updates.sourceGroupId = sourceGroupIdInput;
         updates.sourceThreadIds = sourceThreadIdsInput;
         updates.sourceThreadId = sourceThreadIdsInput[0] ?? null;
+        updates.sourceMessageRecognitionConfig = {
+          enabled: sourceMessageRecognitionEnabledInput,
+          requiredKeywords: parseRecognitionKeywords(sourceMessageRecognitionKeywordsInput),
+        };
       }
       if (field === 'bot') {
         updates.botToken = tokenInput.trim();
@@ -1872,7 +1895,37 @@ export default function ChatDetails({
                     (v: number | '' | number[]) => setSourceThreadIdsInput(Array.isArray(v) ? v : []),
                     () => setEditCard(null),
                     () => handleSaveCard('source'),
-                    undefined,
+                    <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nâng cao: nhận dạng tin nhắn</strong>
+                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                          Để tránh nghe nhầm, bot chỉ nhận những tin có đủ các dấu hiệu bạn nhập bên dưới. Mặc định là `CT`, `Buổi`, `HM`.
+                        </span>
+                      </div>
+
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+                        <input
+                          type="checkbox"
+                          checked={sourceMessageRecognitionEnabledInput}
+                          onChange={(e) => setSourceMessageRecognitionEnabledInput(e.target.checked)}
+                        />
+                        <span>Chỉ nghe tin đúng mẫu đã cấu hình</span>
+                      </label>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Các dấu hiệu bắt buộc</label>
+                        <textarea
+                          value={sourceMessageRecognitionKeywordsInput}
+                          onChange={(e) => setSourceMessageRecognitionKeywordsInput(e.target.value)}
+                          rows={3}
+                          placeholder="CT, Buổi, HM"
+                          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                          Mỗi dấu hiệu cách nhau bằng dấu phẩy hoặc xuống dòng. Bot sẽ chỉ nghe khi tin nhắn có đủ tất cả dấu hiệu này.
+                        </span>
+                      </div>
+                    </div>,
                     { selectorId: 'source' }
                   )}
                 </div>

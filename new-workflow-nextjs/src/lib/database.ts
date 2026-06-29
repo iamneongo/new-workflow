@@ -89,6 +89,11 @@ export type FinalMessageMode = 'forward' | 'copy';
 
 export type SupplyChangeMessageMode = 'forward' | 'copy';
 
+export interface SourceMessageRecognitionConfig {
+  enabled: boolean;
+  requiredKeywords: string[];
+}
+
 export interface ApprovalActionConfig {
   agreeButtonLabel: string;
   disagreeButtonLabel: string;
@@ -111,6 +116,11 @@ export interface SupplierRoute {
   threadId: number | null;
   messageMode: SupplierRouteMode;
 }
+
+export const DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG: SourceMessageRecognitionConfig = {
+  enabled: true,
+  requiredKeywords: ['CT', 'Buổi', 'HM'],
+};
 
 export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMode {
   return value === 'copy' ? 'copy' : 'forward';
@@ -227,6 +237,25 @@ export function normalizeThreadIds(value: unknown): number[] {
   return Array.from(new Set(normalized));
 }
 
+export function normalizeSourceMessageRecognitionConfig(value: unknown): SourceMessageRecognitionConfig {
+  const fallback = DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG;
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  const cfg = value as Partial<SourceMessageRecognitionConfig>;
+  const requiredKeywords = Array.isArray(cfg.requiredKeywords)
+    ? cfg.requiredKeywords
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+    : fallback.requiredKeywords;
+
+  return {
+    enabled: cfg.enabled !== false,
+    requiredKeywords: requiredKeywords.length > 0 ? Array.from(new Set(requiredKeywords)) : fallback.requiredKeywords,
+  };
+}
+
 function readStoredThreadIds(threadIdsValue: unknown, legacyThreadId: unknown): number[] {
   if (threadIdsValue !== null && threadIdsValue !== undefined) {
     return normalizeThreadIds(threadIdsValue);
@@ -298,6 +327,7 @@ export interface AutomationSetup {
   sourceGroupId: string;
   sourceThreadIds: number[];
   sourceThreadId: number | null;
+  sourceMessageRecognitionConfig: SourceMessageRecognitionConfig;
   approvalGroupId: string;
   approvalThreadId: number | null;
   approvalMessageMode: ApprovalMessageMode;
@@ -379,6 +409,7 @@ export async function ensureDatabase(): Promise<void> {
         source_group_id VARCHAR(100),
         source_thread_ids INTEGER[],
         source_thread_id INTEGER,
+        source_message_recognition_config JSONB,
         approval_group_id VARCHAR(100),
         approval_thread_id INTEGER,
         approval_message_mode VARCHAR(20),
@@ -414,6 +445,7 @@ export async function ensureDatabase(): Promise<void> {
     const alterQueries = [
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_id INTEGER',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_thread_ids INTEGER[]',
+      'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS source_message_recognition_config JSONB',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_group_id VARCHAR(100)',
       'ALTER TABLE automation_setups ADD COLUMN IF NOT EXISTS approval_thread_id INTEGER',
@@ -463,6 +495,12 @@ export async function ensureDatabase(): Promise<void> {
       SET source_thread_ids = ARRAY[source_thread_id]
       WHERE source_thread_ids IS NULL AND source_thread_id IS NOT NULL
     `);
+
+    await client.query(`
+      UPDATE automation_setups
+      SET source_message_recognition_config = COALESCE(source_message_recognition_config, $1::jsonb)
+      WHERE source_message_recognition_config IS NULL
+    `, [JSON.stringify(DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG)]);
 
     await client.query(`
       UPDATE automation_setups
@@ -807,6 +845,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   sourceGroupId: '',
   sourceThreadIds: [],
   sourceThreadId: null,
+  sourceMessageRecognitionConfig: DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG,
   approvalGroupId: '',
   approvalThreadId: null,
   approvalMessageMode: 'forward',
@@ -862,6 +901,7 @@ export async function loadAutomationSetups(): Promise<AutomationSetup[]> {
         sourceGroupId: row.source_group_id || '',
         sourceThreadIds,
         sourceThreadId: sourceThreadIds[0] ?? null,
+        sourceMessageRecognitionConfig: normalizeSourceMessageRecognitionConfig(row.source_message_recognition_config),
         approvalGroupId: row.approval_group_id || '',
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
@@ -918,6 +958,7 @@ export async function loadAutomationSetup(id: string): Promise<AutomationSetup |
       sourceGroupId: row.source_group_id || '',
       sourceThreadIds,
       sourceThreadId: sourceThreadIds[0] ?? null,
+      sourceMessageRecognitionConfig: normalizeSourceMessageRecognitionConfig(row.source_message_recognition_config),
       approvalGroupId: row.approval_group_id || '',
       approvalThreadId: normalizeThreadId(row.approval_thread_id),
       approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),
@@ -986,6 +1027,9 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       sortOrder,
       sourceThreadIds,
       sourceThreadId: sourceThreadIds[0] ?? null,
+      sourceMessageRecognitionConfig: hasField('sourceMessageRecognitionConfig')
+        ? normalizeSourceMessageRecognitionConfig(setup.sourceMessageRecognitionConfig)
+        : current.sourceMessageRecognitionConfig,
       approvalMessageMode: hasField('approvalMessageMode')
         ? normalizeApprovalMessageMode(setup.approvalMessageMode)
         : current.approvalMessageMode,
@@ -1037,7 +1081,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
 
     await p.query(`
         INSERT INTO automation_setups (
-        id, name, sort_order, source_group_id, source_thread_id, source_thread_ids,
+        id, name, sort_order, source_group_id, source_thread_id, source_thread_ids, source_message_recognition_config,
         approval_group_id, approval_thread_id, approval_message_mode, approval_custom_message, approval_action_config, approval_topic_configs,
         supply_group_id, supply_thread_id, supplier_selection_hide_after_action, supply_prompt_hide_after_action, supply_listen_group_id, supply_listen_thread_ids, supply_listen_thread_id, supply_change_group_id, supply_change_thread_id, supply_change_message_mode, supplier_routes,
         delivery_group_id, delivery_thread_id, final_message_mode,
@@ -1045,13 +1089,14 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
         reject_group_id, reject_thread_id,
         is_listening, forward_count, last_forward_time, dest_group_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         sort_order = EXCLUDED.sort_order,
         source_group_id = EXCLUDED.source_group_id,
         source_thread_id = EXCLUDED.source_thread_id,
         source_thread_ids = EXCLUDED.source_thread_ids,
+        source_message_recognition_config = EXCLUDED.source_message_recognition_config,
         approval_group_id = EXCLUDED.approval_group_id,
         approval_thread_id = EXCLUDED.approval_thread_id,
         approval_message_mode = EXCLUDED.approval_message_mode,
@@ -1087,6 +1132,7 @@ export async function saveAutomationSetup(setup: Partial<AutomationSetup> & { id
       updated.sourceGroupId,
       updated.sourceThreadId,
       storedSourceThreadIds,
+      JSON.stringify(updated.sourceMessageRecognitionConfig),
       updated.approvalGroupId,
       updated.approvalThreadId,
       updated.approvalMessageMode,
@@ -1157,6 +1203,7 @@ export async function getActiveAutomationSetups(): Promise<AutomationSetup[]> {
         sourceGroupId: row.source_group_id || '',
         sourceThreadIds,
         sourceThreadId: sourceThreadIds[0] ?? null,
+        sourceMessageRecognitionConfig: normalizeSourceMessageRecognitionConfig(row.source_message_recognition_config),
         approvalGroupId: row.approval_group_id || '',
         approvalThreadId: normalizeThreadId(row.approval_thread_id),
         approvalMessageMode: normalizeApprovalMessageMode(row.approval_message_mode),

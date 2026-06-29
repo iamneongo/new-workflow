@@ -3,6 +3,11 @@ export type SupplierRouteMode = 'forward' | 'copy';
 export type FinalMessageMode = 'forward' | 'copy';
 export type SupplyChangeMessageMode = 'forward' | 'copy';
 
+export interface SourceMessageRecognitionConfig {
+  enabled: boolean;
+  requiredKeywords: string[];
+}
+
 export interface ApprovalActionConfig {
   agreeButtonLabel: string;
   disagreeButtonLabel: string;
@@ -25,6 +30,11 @@ export interface SupplierRoute {
   threadId: number | null;
   messageMode: SupplierRouteMode;
 }
+
+export const DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG: SourceMessageRecognitionConfig = {
+  enabled: true,
+  requiredKeywords: ['CT', 'Buổi', 'HM'],
+};
 
 export const DEFAULT_APPROVAL_CUSTOM_MESSAGE =
   '📡 YÊU CẦU PHÊ DUYỆT\n\nVui lòng xem nội dung gốc được gửi bên dưới rồi bấm nút xử lý.';
@@ -64,6 +74,7 @@ export interface AutomationSetup {
   sourceGroupId: string;
   sourceThreadIds: number[];
   sourceThreadId: number | null;
+  sourceMessageRecognitionConfig: SourceMessageRecognitionConfig;
   approvalGroupId: string;
   approvalThreadId: number | null;
   approvalMessageMode: ApprovalMessageMode;

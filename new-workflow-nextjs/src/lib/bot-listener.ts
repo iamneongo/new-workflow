@@ -23,10 +23,12 @@ import {
   ApprovalMessageMode,
   FinalMessageMode,
   SupplierRoute,
+  SourceMessageRecognitionConfig,
   ApprovalActionConfig,
   ApprovalTopicConfig,
   DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   DEFAULT_APPROVAL_ACTION_CONFIG,
+  DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG,
 } from './database';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,7 @@ export interface ActiveListener {
   sourceGroupId: string;
   sourceThreadIds: number[];
   sourceThreadId: number | null;
+  sourceMessageRecognitionConfig: SourceMessageRecognitionConfig;
   normalizedSourceId: string;
   approvalGroupId: string;
   approvalThreadId: number | null;
@@ -188,6 +191,7 @@ export async function autoStartFromConfig(): Promise<void> {
           sourceGroupId: setup.sourceGroupId,
           sourceThreadIds: setup.sourceThreadIds,
           sourceThreadId: setup.sourceThreadId,
+          sourceMessageRecognitionConfig: setup.sourceMessageRecognitionConfig,
           normalizedSourceId: normalized,
           approvalGroupId: setup.approvalGroupId,
           approvalThreadId: setup.approvalThreadId,
@@ -1034,6 +1038,18 @@ async function handleBotMessageTrigger(
       continue;
     }
 
+    const sourceRecognition = resolveSourceMessageRecognitionConfig(listener);
+    if (sourceRecognition.enabled) {
+      const matchResult = matchesSourceMessageRecognition(messageText, sourceRecognition);
+      if (!matchResult.matched) {
+        emitListenerLog('warn', `Bỏ qua tin nhắn vì không khớp dấu hiệu nhận dạng. Thiếu: ${matchResult.missingKeywords.join(', ')}`, {
+          automationId: listener.automationId,
+          step: 'message-filter',
+        });
+        continue;
+      }
+    }
+
     console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${threadId})`);
     emitListenerLog('info', `Nhận tin nhắn trigger từ topic ${threadId ?? 'root/general'}.`, {
       automationId: listener.automationId,
@@ -1213,6 +1229,7 @@ export async function startListenerForAutomation(automationId: string): Promise<
     sourceGroupId: setup.sourceGroupId,
     sourceThreadIds: setup.sourceThreadIds,
     sourceThreadId: setup.sourceThreadId,
+    sourceMessageRecognitionConfig: setup.sourceMessageRecognitionConfig,
     normalizedSourceId: normalized,
     approvalGroupId: setup.approvalGroupId,
     approvalThreadId: setup.approvalThreadId,
@@ -1413,6 +1430,42 @@ function resolveApprovalTopicConfig(autoSetup: any, sourceThreadId: number | nul
     approvalActionConfig: matched.approvalActionConfig
       ? resolveApprovalActionConfig({ approvalActionConfig: matched.approvalActionConfig })
       : base.approvalActionConfig,
+  };
+}
+
+function resolveSourceMessageRecognitionConfig(autoSetup: any): SourceMessageRecognitionConfig {
+  const cfg = autoSetup?.sourceMessageRecognitionConfig || {};
+  const requiredKeywords = Array.isArray(cfg.requiredKeywords)
+    ? cfg.requiredKeywords
+      .map((item: unknown) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean)
+    : DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords;
+
+  return {
+    enabled: cfg.enabled !== false,
+    requiredKeywords: requiredKeywords.length > 0
+      ? Array.from(new Set(requiredKeywords))
+      : DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords,
+  };
+}
+
+function matchesSourceMessageRecognition(
+  messageText: string,
+  config: SourceMessageRecognitionConfig
+): { matched: boolean; missingKeywords: string[] } {
+  if (!config.enabled) {
+    return { matched: true, missingKeywords: [] };
+  }
+
+  const normalizedMessage = (messageText || '').toLocaleLowerCase('vi-VN');
+  const missingKeywords = config.requiredKeywords.filter((keyword) => {
+    const normalizedKeyword = keyword.toLocaleLowerCase('vi-VN').trim();
+    return normalizedKeyword.length > 0 && !normalizedMessage.includes(normalizedKeyword);
+  });
+
+  return {
+    matched: missingKeywords.length === 0,
+    missingKeywords,
   };
 }
 
