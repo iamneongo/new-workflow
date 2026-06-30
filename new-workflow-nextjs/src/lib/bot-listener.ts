@@ -84,6 +84,8 @@ declare global {
   var __processingCallbackActions: Set<string> | undefined;
   // eslint-disable-next-line no-var
   var __processedUpdateIds: Set<number> | undefined;
+  // eslint-disable-next-line no-var
+  var __mediaGroupBuffers: Map<string, { timer: NodeJS.Timeout; messages: any[] }> | undefined;
 }
 
 // Initialize active listeners Map if not present
@@ -95,6 +97,9 @@ if (!global.__processingCallbackActions) {
 }
 if (!global.__processedUpdateIds) {
   global.__processedUpdateIds = new Set();
+}
+if (!global.__mediaGroupBuffers) {
+  global.__mediaGroupBuffers = new Map();
 }
 
 function removeLegacyGramjsListenerIfAny(): void {
@@ -572,12 +577,17 @@ async function handleBotUpdate(update: any) {
             }
           }, `supplier route ${selectedRoute.name}`);
 
+          const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+            ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+            : [Number(log.original_msg_id)];
+
           const sendMethod: 'forwardMessage' | 'copyMessage' = selectedRoute.messageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const contentPromise = sendTelegramMethodWithFallback(baseUrl, sendMethod, {
             chat_id: selectedRoute.groupId,
             message_thread_id: selectedRoute.threadId || undefined,
             from_chat_id: log.original_chat_id,
             message_id: log.original_msg_id,
+            message_ids: originalMsgIds,
           }, `supplier route content ${selectedRoute.name}`);
 
           const [promptData, contentData] = await Promise.all([promptPromise, contentPromise]);
@@ -984,7 +994,43 @@ async function handleBotUpdate(update: any) {
 
     // 2. New message trigger handler
     if (update.message && !replyHandled) {
-      await handleBotMessageTrigger(update.message, p, token);
+      const msg = update.message;
+      if (msg.media_group_id) {
+        const mgId = String(msg.media_group_id);
+        let buffer = global.__mediaGroupBuffers!.get(mgId);
+        if (buffer) {
+          clearTimeout(buffer.timer);
+          buffer.messages.push(msg);
+        } else {
+          buffer = {
+            timer: null as any,
+            messages: [msg],
+          };
+          global.__mediaGroupBuffers!.set(mgId, buffer);
+        }
+
+        buffer.timer = setTimeout(async () => {
+          try {
+            const buf = global.__mediaGroupBuffers!.get(mgId);
+            if (!buf) return;
+            global.__mediaGroupBuffers!.delete(mgId);
+
+            // Sắp xếp theo ID tin nhắn tăng dần
+            const sortedMsgs = buf.messages.sort((a: any, b: any) => Number(a.message_id) - Number(b.message_id));
+            
+            // Lấy tin nhắn có text/caption làm đại diện
+            const representativeMsg = sortedMsgs.find((m: any) => m.text || m.caption) || sortedMsgs[0];
+            const allMsgIds = sortedMsgs.map((m: any) => Number(m.message_id));
+
+            // Kích hoạt trigger cho tin nhắn đại diện, kèm theo mảng tất cả message_id của album
+            await handleBotMessageTrigger(representativeMsg, p, token, allMsgIds);
+          } catch (err: any) {
+            console.error('[BotListener] Error in media group debounce timer:', err?.message || err);
+          }
+        }, 1000);
+      } else {
+        await handleBotMessageTrigger(msg, p, token);
+      }
     }
   } catch (err: any) {
     console.error('[BotListener] Error handling bot update:', err.message);
@@ -1001,7 +1047,8 @@ async function handleBotUpdate(update: any) {
 async function handleBotMessageTrigger(
   msg: any,
   p: ReturnType<typeof getPool>,
-  botToken: string
+  botToken: string,
+  mediaGroupMsgIds?: number[]
 ): Promise<void> {
   const rawChatId = msg?.chat?.id?.toString?.() ?? '';
   if (!rawChatId) return;
@@ -1121,12 +1168,16 @@ async function handleBotMessageTrigger(
     emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
     let logId: number;
     try {
+      const msgIdsStr = Array.isArray(mediaGroupMsgIds) && mediaGroupMsgIds.length > 0
+        ? mediaGroupMsgIds.join(',')
+        : sourceMessageId.toString();
+
       const logRes = await p.query(
-        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_text, status)
-         VALUES ($1, $2, $3, $4, $5, 'pending')
+        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
          ON CONFLICT (automation_id, original_msg_id) DO NOTHING
          RETURNING id`,
-        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, originalText]
+        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText]
       );
       if (logRes.rows.length === 0) {
         emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (ON CONFLICT).`, {
@@ -1234,6 +1285,7 @@ async function handleBotMessageTrigger(
       message_thread_id: listener.approvalThreadId || undefined,
       from_chat_id: listener.sourceGroupId,
       message_id: sourceMessageId,
+      message_ids: mediaGroupMsgIds || [sourceMessageId],
     }, contentLabel);
     emitListenerLog(
       contentData.ok ? 'info' : 'error',
@@ -1841,6 +1893,38 @@ async function sendTelegramMethodWithFallback(
   payload: Record<string, unknown>,
   label: string
 ): Promise<{ ok: boolean; result?: any; description?: string }> {
+  // Nếu nhận được mảng message_ids, sử dụng copyMessages hoặc forwardMessages của Telegram API
+  if (Array.isArray(payload.message_ids) && payload.message_ids.length > 0) {
+    const multiMethod = method === 'forwardMessage' ? 'forwardMessages' : 'copyMessages';
+    const multiPayload = { ...payload };
+    delete multiPayload.message_id; // Xóa message_id đơn lẻ
+
+    console.log(`[BotListener] Sending multiple messages (${multiMethod}): ${payload.message_ids.join(', ')}`);
+    const primary = await sendTelegramJson(baseUrl, multiMethod, multiPayload);
+    if (primary.ok) return primary;
+
+    // Retry fallback không có message_thread_id
+    const threadId = multiPayload.message_thread_id;
+    if (threadId !== undefined) {
+      const fallbackPayload = { ...multiPayload };
+      delete fallbackPayload.message_thread_id;
+      console.warn(`[BotListener] Retrying ${label} (multi) without message_thread_id fallback.`);
+      const fallbackResult = await sendTelegramJson(baseUrl, multiMethod, fallbackPayload);
+      if (fallbackResult.ok) return fallbackResult;
+    }
+
+    // Fallback nếu API telegram không hỗ trợ multi: gửi tuần tự từng ID
+    console.warn(`[BotListener] Multi-message send failed, falling back to sequential sending.`);
+    let lastResult: any = { ok: false, description: 'No messages to send' };
+    for (const msgId of payload.message_ids) {
+      const singlePayload = { ...payload };
+      delete singlePayload.message_ids;
+      singlePayload.message_id = msgId;
+      lastResult = await sendTelegramMethodWithFallback(baseUrl, method, singlePayload, `${label} fallback msgId ${msgId}`);
+    }
+    return lastResult;
+  }
+
   const primary = await sendTelegramJson(baseUrl, method, payload);
   if (primary.ok) return primary;
 
