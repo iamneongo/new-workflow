@@ -441,7 +441,7 @@ async function handleBotUpdate(update: any) {
           if (listenMatch.matched && supplierRoutes.length > 0) {
             await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
 
-            const selectionText = `🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`;
+            const selectionText = addEmojiDivider(`🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`);
             emitListenerLog('info', `Kênh/topic lắng nghe khớp: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
               automationId: log.automation_id,
               step: 'supplier-select',
@@ -559,7 +559,7 @@ async function handleBotUpdate(update: any) {
           }
 
           void (async () => {
-          const supplyText = `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`;
+          const supplyText = addEmojiDivider(`💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
           const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
             chat_id: selectedRoute.groupId,
             message_thread_id: selectedRoute.threadId || undefined,
@@ -716,7 +716,7 @@ async function handleBotUpdate(update: any) {
           await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
-        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`;
+        const deliveryText = addEmojiDivider(`📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`);
         const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: autoSetup.deliveryGroupId,
           message_thread_id: autoSetup.deliveryThreadId || undefined,
@@ -789,8 +789,8 @@ async function handleBotUpdate(update: any) {
           });
         }
         const rejectText = isChange
-          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`
-          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
+          ? addEmojiDivider(`🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`)
+          : addEmojiDivider(`❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`);
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
           message_thread_id: isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined),
@@ -873,7 +873,7 @@ async function handleBotUpdate(update: any) {
             text: '✅ Bot đã nhận phản hồi nghiệm thu và đang chuyển đến nhóm tổng hợp.',
           }, 'delivery reply ack');
 
-          const finalHeader = `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
+          const finalHeader = addEmojiDivider(`✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
@@ -931,7 +931,7 @@ async function handleBotUpdate(update: any) {
             ? log.original_sender_name.trim()
             : 'Kh\u00f4ng r\u00f5';
           const originalRequestText = log.original_text || '[Media]';
-          const enrichedRelayHeader = `\ud83d\udd04 *NH\u00c0 CUNG \u1ee8NG Y\u00caU C\u1ea6U THAY \u0110\u1ed4I V\u1eacT T\u01af*\n\n*Y\u00eau c\u1ea7u ban \u0111\u1ea7u t\u1eeb:* ${originalSenderName}\n*N\u1ed9i dung y\u00eau c\u1ea7u ban \u0111\u1ea7u:* ${originalRequestText}\n\n*Ng\u01b0\u1eddi \u0111ang ph\u1ea3n h\u1ed3i:* ${senderFullName}\n*N\u1ed9i dung ph\u1ea3n h\u1ed3i:* ${replyText || '[Media]'}\n\nN\u1ed9i dung chi ti\u1ebft b\u00ean d\u01b0\u1edbi l\u00e0 tin reply g\u1ed1c \u0111\u01b0\u1ee3c bot chuy\u1ec3n ti\u1ebfp l\u1ea1i.`;
+          const enrichedRelayHeader = addEmojiDivider(`🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Yêu cầu ban đầu từ:* ${originalSenderName}\n*Nội dung yêu cầu ban đầu:* ${originalRequestText}\n\n*Người đang phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới là tin reply gốc được bot chuyển tiếp lại.`);
           const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
           replyHandled = true;
@@ -1479,15 +1479,19 @@ async function resolveBotApiChatId(chatId: string): Promise<string> {
   return `-100${chatId}`;
 }
 
+function addEmojiDivider(text: string): string {
+  return `💠 ─────────────────────── 💠\n\n${text}`;
+}
+
 function formatApprovalCustomMessage(
   template: string,
   senderName: string,
   originalText: string
 ): string {
   const base = (template || DEFAULT_APPROVAL_CUSTOM_MESSAGE).trim() || DEFAULT_APPROVAL_CUSTOM_MESSAGE;
-  return base
+  return addEmojiDivider(base
     .replaceAll('{{senderName}}', senderName)
-    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]'));
 }
 
 function formatApprovalDecisionMessage(
@@ -1511,10 +1515,10 @@ function formatRejectCustomMessage(
   originalText: string
 ): string {
   const base = (template || DEFAULT_REJECT_CUSTOM_MESSAGE).trim() || DEFAULT_REJECT_CUSTOM_MESSAGE;
-  return base
+  return addEmojiDivider(base
     .replaceAll('{{userFullName}}', userFullName)
     .replaceAll('{{senderName}}', senderName || 'Không rõ')
-    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]'));
 }
 
 function resolveApprovalActionConfig(autoSetup: any) {
