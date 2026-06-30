@@ -70,11 +70,6 @@ export interface ActiveListener {
   lastForwardTime: number | null;
 }
 
-const MESSAGE_DIVIDER_START_SETTING_KEY = 'message_divider_start_text';
-const MESSAGE_DIVIDER_END_SETTING_KEY = 'message_divider_end_text';
-const DEFAULT_MESSAGE_DIVIDER_START_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔹 START 🔹 ┄┄┄┄┄┄┄┄┄┄';
-const DEFAULT_MESSAGE_DIVIDER_END_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔸 END 🔸 ┄┄┄┄┄┄┄┄┄┄';
-
 declare global {
   // eslint-disable-next-line no-var
   var __activeListeners: Map<string, ActiveListener> | undefined;
@@ -1850,34 +1845,16 @@ function formatRejectCustomMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]'));
 }
 
-async function loadMessageDividerText(kind: 'start' | 'end'): Promise<string> {
-  const key = kind === 'start' ? MESSAGE_DIVIDER_START_SETTING_KEY : MESSAGE_DIVIDER_END_SETTING_KEY;
-  const fallback = kind === 'start' ? DEFAULT_MESSAGE_DIVIDER_START_TEXT : DEFAULT_MESSAGE_DIVIDER_END_TEXT;
-  const saved = await loadGlobalSetting(key);
-  if (typeof saved === 'string') {
-    return saved.trim();
-  }
-  return fallback;
-}
-
+// Divider lines (START/END) were removed: unstable and visually cluttered.
+// Kept as a no-op so existing call sites don't need to be touched.
 async function sendDividerMessageIfNeeded(
-  baseUrl: string,
-  chatId: string | number,
-  threadId: number | null | undefined,
-  label: string,
-  kind: 'start' | 'end' = 'start'
+  _baseUrl: string,
+  _chatId: string | number,
+  _threadId: number | null | undefined,
+  _label: string,
+  _kind: 'start' | 'end' = 'start'
 ): Promise<number | null> {
-  const dividerText = await loadMessageDividerText(kind);
-  if (!dividerText.trim()) {
-    return null;
-  }
-
-  const result = await sendTelegramMessageWithFallback(baseUrl, {
-    chat_id: chatId,
-    message_thread_id: threadId || undefined,
-    text: dividerText,
-  }, `${label} divider ${kind}`);
-  return result.ok ? result.result.message_id : null;
+  return null;
 }
 
 function formatApprovalCustomMessagePlain(

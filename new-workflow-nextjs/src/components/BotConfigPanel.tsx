@@ -8,9 +8,6 @@ interface BotConfigPanelProps {
   onSaveSuccess?: () => void;
 }
 
-const DEFAULT_DIVIDER_START_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔹 START 🔹 ┄┄┄┄┄┄┄┄┄┄';
-const DEFAULT_DIVIDER_END_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔸 END 🔸 ┄┄┄┄┄┄┄┄┄┄';
-
 export default function BotConfigPanel({
   isOpen,
   onClose,
@@ -21,8 +18,6 @@ export default function BotConfigPanel({
   const [savedTokenLabel, setSavedTokenLabel] = useState('');
   const [tokenStatus, setTokenStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [tokenBotName, setTokenBotName] = useState('');
-  const [dividerStartTextInput, setDividerStartTextInput] = useState(DEFAULT_DIVIDER_START_TEXT);
-  const [dividerEndTextInput, setDividerEndTextInput] = useState(DEFAULT_DIVIDER_END_TEXT);
   const [isSavingToken, setIsSavingToken] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
@@ -40,8 +35,6 @@ export default function BotConfigPanel({
 
         setHasSavedToken(!!data.hasToken);
         setSavedTokenLabel(data.token || '');
-        setDividerStartTextInput(typeof data.dividerStartText === 'string' ? data.dividerStartText : DEFAULT_DIVIDER_START_TEXT);
-        setDividerEndTextInput(typeof data.dividerEndText === 'string' ? data.dividerEndText : DEFAULT_DIVIDER_END_TEXT);
         setTokenInput('');
         setTokenStatus('idle');
         setTokenBotName('');
@@ -87,26 +80,14 @@ export default function BotConfigPanel({
 
   const handleSaveConfig = async () => {
     const token = tokenInput.trim();
-    const shouldSaveDividerOnly = !token && hasSavedToken;
-
-    if (!token && !shouldSaveDividerOnly) {
-      return;
-    }
+    if (!token) return;
 
     setIsSavingToken(true);
     try {
-      const payload: { token?: string; dividerStartText: string; dividerEndText: string } = {
-        dividerStartText: dividerStartTextInput,
-        dividerEndText: dividerEndTextInput,
-      };
-      if (token) {
-        payload.token = token;
-      }
-
       const res = await fetch('/api/bot-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ token }),
       });
       const data = await res.json();
       if (data.success) {
@@ -174,7 +155,7 @@ export default function BotConfigPanel({
             <div>
               <h2 style={{ fontSize: '14px', margin: 0, fontWeight: '700' }}>Cấu hình Telegram Bot</h2>
               <p style={{ fontSize: '10px', margin: 0, color: 'var(--color-text-muted)' }}>
-                Cài đặt token bot và đường line dùng chung cho toàn hệ thống
+                Cài đặt token bot dùng chung cho toàn hệ thống
               </p>
             </div>
           </div>
@@ -261,59 +242,6 @@ export default function BotConfigPanel({
             * Thay đổi ở đây sẽ cập nhật Token Bot toàn cục dùng cho tất cả automation.
           </span>
 
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
-              paddingTop: '10px',
-              marginTop: '6px',
-              borderTop: '1px solid var(--border-color)',
-            }}
-          >
-            <label style={{ fontSize: '11px', fontWeight: '600' }}>Đường line bắt đầu (start):</label>
-            <textarea
-              value={dividerStartTextInput}
-              onChange={(e) => setDividerStartTextInput(e.target.value)}
-              rows={2}
-              placeholder="Ví dụ: ┄┄┄┄┄┄┄┄┄┄ 🔹 START 🔹 ┄┄┄┄┄┄┄┄┄┄"
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                padding: '8px 10px',
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                resize: 'vertical',
-                lineHeight: 1.4,
-              }}
-            />
-            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-              Bot gửi dòng này thành một tin nhắn riêng ngay trước mỗi mục nội dung mới (yêu cầu phê duyệt, vật tư...).
-            </span>
-
-            <label style={{ fontSize: '11px', fontWeight: '600', marginTop: '8px' }}>Đường line kết thúc (end):</label>
-            <textarea
-              value={dividerEndTextInput}
-              onChange={(e) => setDividerEndTextInput(e.target.value)}
-              rows={2}
-              placeholder="Ví dụ: ┄┄┄┄┄┄┄┄┄┄ 🔸 END 🔸 ┄┄┄┄┄┄┄┄┄┄"
-              style={{
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '4px',
-                padding: '8px 10px',
-                color: 'var(--color-text)',
-                fontSize: '12px',
-                resize: 'vertical',
-                lineHeight: 1.4,
-              }}
-            />
-            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
-              Bot gửi dòng này ngay sau khi một mục đã xử lý xong (đồng ý/từ chối...). Để trống nếu muốn bỏ line tương ứng.
-            </span>
-          </div>
-
           {tokenStatus === 'ok' && (
             <div style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <i className="fa-solid fa-circle-check" /> Bot hợp lệ: @{tokenBotName}
@@ -341,7 +269,7 @@ export default function BotConfigPanel({
             <button
               className="btn btn-primary"
               onClick={handleSaveConfig}
-              disabled={(!tokenInput.trim() && !hasSavedToken) || isSavingToken}
+              disabled={!tokenInput.trim() || isSavingToken}
               style={{
                 fontSize: '11px',
                 padding: '6px 12px',
