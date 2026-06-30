@@ -8,22 +8,26 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const MESSAGE_DIVIDER_SETTING_KEY = 'message_divider_text';
-const DEFAULT_MESSAGE_DIVIDER_TEXT = '💠 ─────────────────────── 💠';
+const MESSAGE_DIVIDER_START_SETTING_KEY = 'message_divider_start_text';
+const MESSAGE_DIVIDER_END_SETTING_KEY = 'message_divider_end_text';
+const DEFAULT_MESSAGE_DIVIDER_START_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔹 START 🔹 ┄┄┄┄┄┄┄┄┄┄';
+const DEFAULT_MESSAGE_DIVIDER_END_TEXT = '┄┄┄┄┄┄┄┄┄┄ 🔸 END 🔸 ┄┄┄┄┄┄┄┄┄┄';
 
 /**
  * GET /api/bot-config
- * Returns the masked global bot token and the shared divider text.
+ * Returns the masked global bot token and the shared start/end divider text.
  */
 export async function GET() {
   try {
     const token = await loadGlobalBotToken();
-    const dividerText = await loadGlobalSetting(MESSAGE_DIVIDER_SETTING_KEY);
+    const dividerStartText = await loadGlobalSetting(MESSAGE_DIVIDER_START_SETTING_KEY);
+    const dividerEndText = await loadGlobalSetting(MESSAGE_DIVIDER_END_SETTING_KEY);
 
     return NextResponse.json({
       hasToken: !!token,
       token: token ? `****${token.slice(-6)}` : '',
-      dividerText: typeof dividerText === 'string' ? dividerText : DEFAULT_MESSAGE_DIVIDER_TEXT,
+      dividerStartText: typeof dividerStartText === 'string' ? dividerStartText : DEFAULT_MESSAGE_DIVIDER_START_TEXT,
+      dividerEndText: typeof dividerEndText === 'string' ? dividerEndText : DEFAULT_MESSAGE_DIVIDER_END_TEXT,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -32,13 +36,13 @@ export async function GET() {
 
 /**
  * POST /api/bot-config
- * Body: { token?, dividerText? }
- * Saves the global bot token and divider text.
+ * Body: { token?, dividerStartText?, dividerEndText? }
+ * Saves the global bot token and start/end divider text.
  */
 export async function POST(req: NextRequest) {
   try {
-    const { token, dividerText } = await req.json();
-    if (!token && dividerText === undefined) {
+    const { token, dividerStartText, dividerEndText } = await req.json();
+    if (!token && dividerStartText === undefined && dividerEndText === undefined) {
       return NextResponse.json({ error: 'Thiếu dữ liệu cần lưu' }, { status: 400 });
     }
 
@@ -58,16 +62,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const existingDividerText = await loadGlobalSetting(MESSAGE_DIVIDER_SETTING_KEY);
-    const normalizedDividerText = typeof dividerText === 'string'
-      ? dividerText
-      : (typeof existingDividerText === 'string' ? existingDividerText : DEFAULT_MESSAGE_DIVIDER_TEXT);
-    await saveGlobalSetting(MESSAGE_DIVIDER_SETTING_KEY, normalizedDividerText);
+    const existingStartText = await loadGlobalSetting(MESSAGE_DIVIDER_START_SETTING_KEY);
+    const normalizedStartText = typeof dividerStartText === 'string'
+      ? dividerStartText
+      : (typeof existingStartText === 'string' ? existingStartText : DEFAULT_MESSAGE_DIVIDER_START_TEXT);
+    await saveGlobalSetting(MESSAGE_DIVIDER_START_SETTING_KEY, normalizedStartText);
+
+    const existingEndText = await loadGlobalSetting(MESSAGE_DIVIDER_END_SETTING_KEY);
+    const normalizedEndText = typeof dividerEndText === 'string'
+      ? dividerEndText
+      : (typeof existingEndText === 'string' ? existingEndText : DEFAULT_MESSAGE_DIVIDER_END_TEXT);
+    await saveGlobalSetting(MESSAGE_DIVIDER_END_SETTING_KEY, normalizedEndText);
 
     return NextResponse.json({
       success: true,
       token: currentToken ? `****${currentToken.slice(-6)}` : '',
-      dividerText: normalizedDividerText,
+      dividerStartText: normalizedStartText,
+      dividerEndText: normalizedEndText,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
