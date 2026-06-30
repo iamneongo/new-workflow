@@ -670,6 +670,7 @@ export async function ensureDatabase(): Promise<void> {
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS supply_prompt_thread_id INTEGER',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS delivery_group_id VARCHAR(100)',
       'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS original_msg_ids TEXT',
+      'ALTER TABLE workflow_logs ADD COLUMN IF NOT EXISTS approval_content_msg_ids TEXT',
     ];
     for (const q of workflowLogAlterQueries) {
       await client.query(q);

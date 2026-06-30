@@ -435,7 +435,13 @@ async function handleBotUpdate(update: any) {
             return;
           }
 
-          await p.query("UPDATE workflow_logs SET status = 'approved' WHERE id = $1", [logId]);
+          const apprAgreeClaim = await p.query(
+            "UPDATE workflow_logs SET status = 'approved' WHERE id = $1 AND status = 'pending' RETURNING id",
+            [logId]
+          );
+          if (apprAgreeClaim.rows.length === 0) {
+            return;
+          }
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '');
           const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
@@ -709,7 +715,14 @@ async function handleBotUpdate(update: any) {
           }
         }
 
-        await p.query("UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1", [logId]);
+        const supplyAgreeClaim = await p.query(
+          "UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1 AND status = 'supply_sent' RETURNING id",
+          [logId]
+        );
+        if (supplyAgreeClaim.rows.length === 0) {
+          // Đã được một lần xử lý khác (vd. update bị Telegram gửi lại sau khi service restart) giành xử lý trước.
+          return;
+        }
         const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
 
         await fetch(`${baseUrl}/editMessageText`, {
@@ -775,7 +788,13 @@ async function handleBotUpdate(update: any) {
         const newStatus = isChange ? 'supply_changed' : 'supply_rejected';
         const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
 
-        await p.query("UPDATE workflow_logs SET status = $1 WHERE id = $2", [newStatus, logId]);
+        const supplyDecisionClaim = await p.query(
+          "UPDATE workflow_logs SET status = $1 WHERE id = $2 AND status = 'supply_sent' RETURNING id",
+          [newStatus, logId]
+        );
+        if (supplyDecisionClaim.rows.length === 0) {
+          return;
+        }
 
         const statusLabel = isChange ? '🔄 YÊU CẦU THAY ĐỔI VẬT TƯ' : '❌ TỪ CHỐI CUNG CẤP VẬT TƯ';
         await fetch(`${baseUrl}/editMessageText`, {
@@ -867,6 +886,19 @@ async function handleBotUpdate(update: any) {
             chat_id: autoSetup.approvalGroupId,
             message_id: log.approval_msg_id,
           }, 'superseded approval prompt');
+        }
+
+        if (autoSetup.approvalGroupId && typeof log.approval_content_msg_ids === 'string' && log.approval_content_msg_ids.trim()) {
+          const contentMsgIds = log.approval_content_msg_ids
+            .split(',')
+            .map((id: string) => Number(id.trim()))
+            .filter((id: number) => Number.isInteger(id) && id > 0);
+          for (const contentMsgId of contentMsgIds) {
+            await deleteTelegramMessage(baseUrl, {
+              chat_id: autoSetup.approvalGroupId,
+              message_id: contentMsgId,
+            }, 'superseded approval content');
+          }
         }
 
         if (!options.isEdit && approvalTopicConfig.approvalActionConfig.deleteSourceMessageOnReply === true) {
@@ -1428,6 +1460,20 @@ async function handleBotMessageTrigger(
         : `Không thể ${approvalTopicConfig.approvalMessageMode === 'copy' ? 'copy' : 'forward'} nội dung gốc: ${contentData.description || 'unknown error'}`,
       { automationId: listener.automationId, step: 'content' }
     );
+
+    if (contentData.ok) {
+      const contentMsgIds: number[] = Array.isArray(contentData.result)
+        ? contentData.result.map((r: any) => r?.message_id).filter((id: any): id is number => Number.isInteger(id))
+        : Number.isInteger(contentData.result?.message_id)
+          ? [contentData.result.message_id]
+          : [];
+      if (contentMsgIds.length > 0) {
+        await p.query(
+          "UPDATE workflow_logs SET approval_content_msg_ids = $1 WHERE id = $2",
+          [contentMsgIds.join(','), logId]
+        );
+      }
+    }
 
     listener.forwardCount += 1;
     listener.lastForwardTime = Date.now();
