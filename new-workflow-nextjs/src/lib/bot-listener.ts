@@ -544,7 +544,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
                 [selectionData.result.message_id, logId]
               );
-              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
             }
             return;
           }
@@ -560,7 +560,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
             return;
           }
 
@@ -602,7 +602,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
-          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -643,7 +643,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           void (async () => {
           const supplyText = withProjectTag(log.original_text, `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
-          await sendDividerMessageIfNeeded(baseUrl, selectedRoute.groupId, selectedRoute.threadId || undefined, `supplier route ${selectedRoute.name}`);
+          const supplyDividerMsgId = await sendDividerMessageIfNeeded(baseUrl, selectedRoute.groupId, selectedRoute.threadId || undefined, `supplier route ${selectedRoute.name}`);
           const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
             chat_id: selectedRoute.groupId,
             message_thread_id: selectedRoute.threadId || undefined,
@@ -704,8 +704,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                  selected_supplier_group_id = $3,
                  selected_supplier_thread_id = $4,
                  supply_prompt_group_id = $5,
-                 supply_prompt_thread_id = $6
-             WHERE id = $7`,
+                 supply_prompt_thread_id = $6,
+                 supply_divider_msg_id = $7
+             WHERE id = $8`,
             [
               promptData.result.message_id,
               selectedRoute.id,
@@ -713,6 +714,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               selectedRoute.threadId,
               selectedRoute.groupId,
               selectedRoute.threadId,
+              supplyDividerMsgId,
               logId,
             ]
           );
@@ -823,7 +825,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             automationId: log.automation_id,
             step: 'delivery',
           });
-          await finalizeCallbackStatus(`✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`, 'supply agree final', hideSupplyPromptMessage);
+          await finalizeCallbackStatus(`✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`, 'supply agree final', hideSupplyPromptMessage, parseMsgIdList(undefined, log.supply_divider_msg_id));
         } else {
           emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
             automationId: log.automation_id,
@@ -898,7 +900,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         if (isChange && rejectData.ok) {
           await p.query("UPDATE workflow_logs SET supply_change_msg_id = $1 WHERE id = $2", [rejectData.result.message_id, logId]);
         }
-        await finalizeCallbackStatus(`${statusLabel} bởi ${userFullName}`, 'supply decision final', hideSupplyPromptMessage);
+        await finalizeCallbackStatus(`${statusLabel} bởi ${userFullName}`, 'supply decision final', hideSupplyPromptMessage, parseMsgIdList(undefined, log.supply_divider_msg_id));
       }
       } finally {
         global.__processingCallbackActions!.delete(actionKey);
@@ -955,6 +957,13 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             chat_id: autoSetup.approvalGroupId,
             message_id: log.approval_msg_id,
           }, 'superseded approval prompt');
+        }
+
+        if (log.approval_divider_msg_id && autoSetup.approvalGroupId) {
+          await deleteTelegramMessage(baseUrl, {
+            chat_id: autoSetup.approvalGroupId,
+            message_id: log.approval_divider_msg_id,
+          }, 'superseded approval divider');
         }
 
         if (autoSetup.approvalGroupId && typeof log.approval_content_msg_ids === 'string' && log.approval_content_msg_ids.trim()) {
@@ -1507,7 +1516,7 @@ async function handleBotMessageTrigger(
       automationId: listener.automationId,
       step: 'approval',
     });
-    await sendDividerMessageIfNeeded(activeBaseUrl, listener.approvalGroupId, listener.approvalThreadId || undefined, 'approval prompt');
+    const approvalDividerMsgId = await sendDividerMessageIfNeeded(activeBaseUrl, listener.approvalGroupId, listener.approvalThreadId || undefined, 'approval prompt');
     const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
       chat_id: listener.approvalGroupId,
       message_thread_id: listener.approvalThreadId || undefined,
@@ -1533,7 +1542,10 @@ async function handleBotMessageTrigger(
       { automationId: listener.automationId, step: 'approval' }
     );
     if (apprData.ok) {
-      await p.query("UPDATE workflow_logs SET approval_msg_id = $1 WHERE id = $2", [apprData.result.message_id, logId]);
+      await p.query(
+        "UPDATE workflow_logs SET approval_msg_id = $1, approval_divider_msg_id = $2 WHERE id = $3",
+        [apprData.result.message_id, approvalDividerMsgId, logId]
+      );
     }
 
     const contentMethod = approvalTopicConfig.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
@@ -1813,17 +1825,18 @@ async function sendDividerMessageIfNeeded(
   chatId: string | number,
   threadId: number | null | undefined,
   label: string
-): Promise<void> {
+): Promise<number | null> {
   const dividerText = await loadMessageDividerText();
   if (!dividerText.trim()) {
-    return;
+    return null;
   }
 
-  await sendTelegramMessageWithFallback(baseUrl, {
+  const result = await sendTelegramMessageWithFallback(baseUrl, {
     chat_id: chatId,
     message_thread_id: threadId || undefined,
     text: dividerText,
   }, `${label} divider`);
+  return result.ok ? result.result.message_id : null;
 }
 
 function formatApprovalCustomMessagePlain(
@@ -2432,12 +2445,14 @@ async function reactToTelegramMessage(
   return result;
 }
 
-function parseMsgIdList(value: unknown): number[] {
-  if (typeof value !== 'string' || !value.trim()) return [];
-  return value
-    .split(',')
-    .map((id) => Number(id.trim()))
-    .filter((id) => Number.isInteger(id) && id > 0);
+function parseMsgIdList(value: unknown, ...extraIds: unknown[]): number[] {
+  const ids = typeof value === 'string' && value.trim()
+    ? value.split(',').map((id) => Number(id.trim()))
+    : [];
+  for (const extra of extraIds) {
+    if (extra !== null && extra !== undefined) ids.push(Number(extra));
+  }
+  return ids.filter((id) => Number.isInteger(id) && id > 0);
 }
 
 function buildOriginalRepost(log: any, mode: ApprovalMessageMode): { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' } {
