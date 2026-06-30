@@ -92,6 +92,8 @@ declare global {
   var __mediaGroupBuffers: Map<string, { timer: NodeJS.Timeout; messages: any[] }> | undefined;
   // eslint-disable-next-line no-var
   var __pendingIncompleteNotices: Map<string, { chatId: number; noticeMsgId: number; createdAt: number }> | undefined;
+  // eslint-disable-next-line no-var
+  var __replyMediaGroupBuffers: Map<string, { timer: NodeJS.Timeout; updates: any[] }> | undefined;
 }
 
 // Initialize active listeners Map if not present
@@ -109,6 +111,9 @@ if (!global.__mediaGroupBuffers) {
 }
 if (!global.__pendingIncompleteNotices) {
   global.__pendingIncompleteNotices = new Map();
+}
+if (!global.__replyMediaGroupBuffers) {
+  global.__replyMediaGroupBuffers = new Map();
 }
 
 function removeLegacyGramjsListenerIfAny(): void {
@@ -332,18 +337,49 @@ async function pollUpdates() {
   }
 }
 
-async function handleBotUpdate(update: any) {
-  // Dedup: skip if this update_id has already been processed (prevents polling retry duplicates)
+async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
+  // Dedup: skip if this update_id has already been processed (prevents polling retry duplicates).
+  // Skipped for the synthetic re-dispatch of a buffered reply album (forcedAlbumMsgIds set below).
   const updateId: number = update.update_id;
-  if (global.__processedUpdateIds!.has(updateId)) {
-    console.log(`[BotListener] Skipping already-processed update_id ${updateId}.`);
-    return;
-  }
-  global.__processedUpdateIds!.add(updateId);
-  // Cleanup old entries to prevent memory leak (keep last 500)
-  if (global.__processedUpdateIds!.size > 1000) {
-    const entries = Array.from(global.__processedUpdateIds!);
-    global.__processedUpdateIds = new Set(entries.slice(-500));
+  if (!forcedAlbumMsgIds) {
+    if (global.__processedUpdateIds!.has(updateId)) {
+      console.log(`[BotListener] Skipping already-processed update_id ${updateId}.`);
+      return;
+    }
+    global.__processedUpdateIds!.add(updateId);
+    // Cleanup old entries to prevent memory leak (keep last 500)
+    if (global.__processedUpdateIds!.size > 1000) {
+      const entries = Array.from(global.__processedUpdateIds!);
+      global.__processedUpdateIds = new Set(entries.slice(-500));
+    }
+
+    // A reply that's part of a media-group album (e.g. nghiệm thu reply with
+    // several photos) arrives as one update per photo. Buffer them so the
+    // reply-handling branches below run once for the whole album instead of
+    // once per photo (which used to create one "GHI NHẬN NGHIỆM THU" per photo).
+    if (update.message?.media_group_id && update.message?.reply_to_message) {
+      const mgId = String(update.message.media_group_id);
+      let buffer = global.__replyMediaGroupBuffers!.get(mgId);
+      if (buffer) {
+        clearTimeout(buffer.timer);
+        buffer.updates.push(update);
+      } else {
+        buffer = { timer: null as any, updates: [update] };
+        global.__replyMediaGroupBuffers!.set(mgId, buffer);
+      }
+      buffer.timer = setTimeout(() => {
+        const buf = global.__replyMediaGroupBuffers!.get(mgId);
+        if (!buf) return;
+        global.__replyMediaGroupBuffers!.delete(mgId);
+        const sortedUpdates = buf.updates.sort((a: any, b: any) => Number(a.message.message_id) - Number(b.message.message_id));
+        const representative = sortedUpdates.find((u: any) => u.message.text || u.message.caption) || sortedUpdates[0];
+        const allIds = sortedUpdates.map((u: any) => Number(u.message.message_id));
+        void handleBotUpdate(representative, allIds).catch((err: any) => {
+          console.error('[BotListener] Unhandled buffered reply album error:', err?.message || err);
+        });
+      }, 1000);
+      return;
+    }
   }
 
   let callbackFailureReporter: ((bodyText: string, label: string) => Promise<void>) | null = null;
@@ -1010,11 +1046,13 @@ async function handleBotUpdate(update: any) {
           }, 'final header');
 
           const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          const finalRelayMsgIds = forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0 ? forcedAlbumMsgIds : [msg.message_id];
           await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
             from_chat_id: msg.chat.id,
-            message_id: msg.message_id,
+            message_id: finalRelayMsgIds[0],
+            message_ids: finalRelayMsgIds,
           }, 'final relay content');
 
           console.log(`[BotListener] Workflow log ${log.id} successfully completed & notified!`);
@@ -1073,11 +1111,13 @@ async function handleBotUpdate(update: any) {
           }, 'supply change relay header');
 
           if (relayData.ok) {
+            const supplyChangeRelayMsgIds = forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0 ? forcedAlbumMsgIds : [msg.message_id];
             await sendTelegramMethodWithFallback(baseUrl, relayMode, {
               chat_id: targetGroupId,
               message_thread_id: relayThreadId,
               from_chat_id: msg.chat.id,
-              message_id: msg.message_id,
+              message_id: supplyChangeRelayMsgIds[0],
+              message_ids: supplyChangeRelayMsgIds,
             }, 'supply change relay content');
           }
         }
