@@ -416,12 +416,18 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackChatId = cq.message?.chat?.id;
       const callbackMessageId = cq.message?.message_id;
       const originalCleanText = cq.message?.text || cq.message?.caption || '';
+      // The card being clicked may be a plain text message or a media message
+      // (photo/document/video) whose caption we're editing — pick the right
+      // Telegram API method based on what's actually on cq.message.
+      const callbackCardIsMedia = Boolean(cq.message?.photo || cq.message?.document || cq.message?.video);
       const updateCallbackStatus = async (bodyText: string, label: string) => {
         if (!callbackChatId || !callbackMessageId) return;
-        await editTelegramMessageWithFallback(baseUrl, {
+        const editFn = callbackCardIsMedia ? editTelegramMessageCaptionWithFallback : editTelegramMessageWithFallback;
+        const textField = callbackCardIsMedia ? 'caption' : 'text';
+        await editFn(baseUrl, {
           chat_id: callbackChatId,
           message_id: callbackMessageId,
-          text: `${originalCleanText}\n\n${bodyText}`,
+          [textField]: `${originalCleanText}\n\n${bodyText}`,
           reply_markup: { inline_keyboard: [] },
         }, label);
       };
@@ -564,32 +570,44 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           void (async () => {
           const supplyText = withProjectTag(log.original_text, `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
-          const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: selectedRoute.groupId,
-            message_thread_id: selectedRoute.threadId || undefined,
-            text: supplyText,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: '✅ Đồng ý cấp vật tư', callback_data: `supply_agree:${logId}` },
-                ],
-                [
-                  { text: '❌ Không đồng ý cấp vật tư', callback_data: `supply_reject:${logId}` },
-                  { text: '🔄 Yêu cầu thay đổi vật tư', callback_data: `supply_change:${logId}` },
-                ]
+          const supplyReplyMarkup = {
+            inline_keyboard: [
+              [
+                { text: '✅ Đồng ý cấp vật tư', callback_data: `supply_agree:${logId}` },
+              ],
+              [
+                { text: '❌ Không đồng ý cấp vật tư', callback_data: `supply_reject:${logId}` },
+                { text: '🔄 Yêu cầu thay đổi vật tư', callback_data: `supply_change:${logId}` },
               ]
-            }
-          }, `supplier route ${selectedRoute.name}`);
+            ]
+          };
+          // A single photo/document/video can be attached directly to the
+          // supply prompt via copyMessage (caption + buttons), same as the
+          // approval card. Albums can't carry an inline keyboard, so they
+          // still get a plain text prompt plus the relayed album below it.
+          const promptPromise = log.original_has_media
+            ? sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                chat_id: selectedRoute.groupId,
+                message_thread_id: selectedRoute.threadId || undefined,
+                from_chat_id: log.original_chat_id,
+                message_id: log.original_msg_id,
+                caption: supplyText,
+                reply_markup: supplyReplyMarkup,
+              }, `supplier route ${selectedRoute.name} (media)`)
+            : sendTelegramMessageWithFallback(baseUrl, {
+                chat_id: selectedRoute.groupId,
+                message_thread_id: selectedRoute.threadId || undefined,
+                text: supplyText,
+                reply_markup: supplyReplyMarkup,
+              }, `supplier route ${selectedRoute.name}`);
 
           const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
             ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
             : [Number(log.original_msg_id)];
+          const isAlbum = originalMsgIds.length > 1;
 
-          // supplyText already embeds "Nội dung: {originalText}", so only
-          // relay the raw source message separately when it actually carries
-          // media the text prompt can't show.
           const sendMethod: 'forwardMessage' | 'copyMessage' = selectedRoute.messageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-          const contentPromise = log.original_has_media
+          const contentPromise = isAlbum
             ? sendTelegramMethodWithFallback(baseUrl, sendMethod, {
                 chat_id: selectedRoute.groupId,
                 message_thread_id: selectedRoute.threadId || undefined,
@@ -688,15 +706,19 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         }
         const supplyAgreeHeaderText = buildApprovalHeaderText(autoSetup, log);
 
-        await fetch(`${baseUrl}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        if (log.original_has_media) {
+          await editTelegramMessageCaptionWithFallback(baseUrl, {
+            chat_id: cq.message.chat.id,
+            message_id: cq.message.message_id,
+            caption: `${originalCleanText}\n\n✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`,
+          }, 'supply agree prompt');
+        } else {
+          await editTelegramMessageWithFallback(baseUrl, {
             chat_id: cq.message.chat.id,
             message_id: cq.message.message_id,
             text: `${originalCleanText}\n\n✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`,
-          }),
-        });
+          }, 'supply agree prompt');
+        }
 
         // Thẻ trạng thái duy nhất đã ghi nhận đủ "đang giao đến công trình",
         // không cần gửi thêm tin THÔNG BÁO GIAO NHẬN VẬT TƯ riêng vào nhóm giao
@@ -736,15 +758,19 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         }
 
         const statusLabel = isChange ? '🔄 YÊU CẦU THAY ĐỔI VẬT TƯ' : '❌ TỪ CHỐI CUNG CẤP VẬT TƯ';
-        await fetch(`${baseUrl}/editMessageText`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        if (log.original_has_media) {
+          await editTelegramMessageCaptionWithFallback(baseUrl, {
+            chat_id: cq.message.chat.id,
+            message_id: cq.message.message_id,
+            caption: `${originalCleanText}\n\n${statusLabel} bởi ${userFullName}`,
+          }, 'supply decision prompt');
+        } else {
+          await editTelegramMessageWithFallback(baseUrl, {
             chat_id: cq.message.chat.id,
             message_id: cq.message.message_id,
             text: `${originalCleanText}\n\n${statusLabel} bởi ${userFullName}`,
-          }),
-        });
+          }, 'supply decision prompt');
+        }
 
         // Send reject/change notification
         const rejectTarget = resolveSupplyRejectTarget(autoSetup, log);
@@ -1217,6 +1243,10 @@ async function handleBotMessageTrigger(
   const hasNonTextMedia = Boolean(
     mediaGroupMsgIds?.length || msg?.photo || msg?.document || msg?.video || msg?.voice || msg?.audio || msg?.animation
   );
+  // A single photo/document/video can be attached directly to the approval
+  // card (copyMessage with a caption + buttons). Albums can't carry an inline
+  // keyboard at all, so they stay as a separate text card + relayed album.
+  const isSingleMediaMessage = hasNonTextMedia && !(mediaGroupMsgIds && mediaGroupMsgIds.length > 1);
 
   const messageText = msg.text || msg.caption || '';
   const sourceMessageId = Number(msg?.message_id ?? msg?.id);
@@ -1352,7 +1382,7 @@ async function handleBotMessageTrigger(
          VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
          ON CONFLICT (automation_id, original_msg_id) DO NOTHING
          RETURNING id`,
-        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText, options?.threadRootMsgId ?? sourceMessageId, hasNonTextMedia]
+        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText, options?.threadRootMsgId ?? sourceMessageId, isSingleMediaMessage]
       );
       if (logRes.rows.length === 0) {
         emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (ON CONFLICT).`, {
@@ -1419,23 +1449,39 @@ async function handleBotMessageTrigger(
       step: 'approval',
     });
     const approvalDividerMsgId = await sendDividerMessageIfNeeded(activeBaseUrl, listener.approvalGroupId, listener.approvalThreadId || undefined, 'approval prompt');
-    const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
-      chat_id: listener.approvalGroupId,
-      message_thread_id: listener.approvalThreadId || undefined,
-      text: withProjectTag(originalText, embedOriginalContent(formatApprovalCustomMessagePlain(
-        approvalTopicConfig.approvalCustomMessage,
-        senderName,
-        originalText
-      ), originalText)),
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: approvalTopicConfig.approvalActionConfig.agreeButtonLabel, callback_data: `appr_agree:${logId}` },
-            { text: approvalTopicConfig.approvalActionConfig.disagreeButtonLabel, callback_data: `appr_disagree:${logId}` }
-          ]
+    const approvalCardText = withProjectTag(originalText, embedOriginalContent(formatApprovalCustomMessagePlain(
+      approvalTopicConfig.approvalCustomMessage,
+      senderName,
+      originalText
+    ), originalText));
+    const approvalReplyMarkup = {
+      inline_keyboard: [
+        [
+          { text: approvalTopicConfig.approvalActionConfig.agreeButtonLabel, callback_data: `appr_agree:${logId}` },
+          { text: approvalTopicConfig.approvalActionConfig.disagreeButtonLabel, callback_data: `appr_disagree:${logId}` }
         ]
-      }
-    }, 'approval prompt');
+      ]
+    };
+    // A single photo/document/video can carry both the caption (header +
+    // buttons) and the media itself in one message via copyMessage, so the
+    // card and the attachment no longer need to be two separate messages.
+    // Albums (media_group_id) can't take an inline keyboard at all — that's a
+    // Telegram API restriction — so they keep the old two-message layout.
+    const apprData = isSingleMediaMessage
+      ? await sendTelegramMethodWithFallback(activeBaseUrl, 'copyMessage', {
+          chat_id: listener.approvalGroupId,
+          message_thread_id: listener.approvalThreadId || undefined,
+          from_chat_id: listener.sourceGroupId,
+          message_id: sourceMessageId,
+          caption: approvalCardText,
+          reply_markup: approvalReplyMarkup,
+        }, 'approval prompt (media)')
+      : await sendTelegramMessageWithFallback(activeBaseUrl, {
+          chat_id: listener.approvalGroupId,
+          message_thread_id: listener.approvalThreadId || undefined,
+          text: approvalCardText,
+          reply_markup: approvalReplyMarkup,
+        }, 'approval prompt');
     emitListenerLog(
       apprData.ok ? 'info' : 'error',
       apprData.ok
@@ -1450,12 +1496,11 @@ async function handleBotMessageTrigger(
       );
     }
 
-    // Skip forwarding/copying the raw original content into the approval
-    // group whenever it's plain text: buildApprovalHeaderText already embeds
-    // log.original_text into the status card, so a second copy right below
-    // it is pure duplication. Only text-less requests (photos, documents...)
-    // still need the separate relay since the card can't show media.
-    if (!hasNonTextMedia) {
+    // Skip the separate content relay whenever the card above already shows
+    // everything: plain text is embedded directly, and single media was just
+    // attached to the card itself via copyMessage. Only true albums (which
+    // can't carry both media and an inline keyboard at once) still need it.
+    if (!hasNonTextMedia || isSingleMediaMessage) {
       listener.forwardCount += 1;
       listener.lastForwardTime = Date.now();
       await saveAutomationSetup({
@@ -1804,6 +1849,27 @@ function buildApprovalHeaderText(autoSetup: any, log: any): string {
 // tracked message (log.approval_msg_id) in place, instead of deleting and
 // recreating messages. Mutates log.status_log so subsequent calls within the
 // same handler invocation see the latest accumulated text.
+// The master status card may be a plain text message OR a media message
+// (photo/document/video) whose caption we're editing — Telegram requires a
+// different API method (editMessageText vs editMessageCaption) for each.
+async function editApprovalCardContent(
+  baseUrl: string,
+  log: any,
+  approvalGroupId: string | undefined | null,
+  text: string,
+  replyMarkup?: any
+): Promise<void> {
+  if (!log.approval_msg_id || !approvalGroupId) return;
+  const editFn = log.original_has_media ? editTelegramMessageCaptionWithFallback : editTelegramMessageWithFallback;
+  const textField = log.original_has_media ? 'caption' : 'text';
+  await editFn(baseUrl, {
+    chat_id: approvalGroupId,
+    message_id: log.approval_msg_id,
+    [textField]: text,
+    reply_markup: replyMarkup || { inline_keyboard: [] },
+  }, 'approval card');
+}
+
 async function appendApprovalStatusLine(
   p: ReturnType<typeof getPool>,
   baseUrl: string,
@@ -1820,14 +1886,7 @@ async function appendApprovalStatusLine(
   const statusBlock = updatedLines.join('\n');
   const fullText = `${headerText}\n\n📋 *Trạng thái:*\n${statusBlock}`;
 
-  if (log.approval_msg_id && approvalGroupId) {
-    await editTelegramMessageWithFallback(baseUrl, {
-      chat_id: approvalGroupId,
-      message_id: log.approval_msg_id,
-      text: fullText,
-      reply_markup: replyMarkup || { inline_keyboard: [] },
-    }, 'approval status update');
-  }
+  await editApprovalCardContent(baseUrl, log, approvalGroupId, fullText, replyMarkup);
   await p.query('UPDATE workflow_logs SET status_log = $1 WHERE id = $2', [statusBlock, log.id]);
   log.status_log = statusBlock;
 }
@@ -1852,14 +1911,7 @@ async function showTransientApprovalNote(
     ? `${headerText}\n\n📋 *Trạng thái:*\n${statusBlock}\n\n${transientNote}`
     : `${headerText}\n\n${transientNote}`;
 
-  if (log.approval_msg_id && approvalGroupId) {
-    await editTelegramMessageWithFallback(baseUrl, {
-      chat_id: approvalGroupId,
-      message_id: log.approval_msg_id,
-      text: fullText,
-      reply_markup: replyMarkup || { inline_keyboard: [] },
-    }, 'approval transient note');
-  }
+  await editApprovalCardContent(baseUrl, log, approvalGroupId, fullText, replyMarkup);
 }
 
 function formatRejectCustomMessagePlain(
@@ -2407,6 +2459,18 @@ async function editTelegramMessageWithFallback(
   if (primary.ok) return primary;
 
   console.warn(`[BotListener] Failed to edit ${label}: ${primary.description || 'unknown error'}`);
+  return primary;
+}
+
+async function editTelegramMessageCaptionWithFallback(
+  baseUrl: string,
+  payload: Record<string, unknown>,
+  label: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const primary = await sendTelegramJson(baseUrl, 'editMessageCaption', payload);
+  if (primary.ok) return primary;
+
+  console.warn(`[BotListener] Failed to edit caption ${label}: ${primary.description || 'unknown error'}`);
   return primary;
 }
 
