@@ -451,6 +451,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             }, `${label} delete content`);
           }
           if (deletion.ok) {
+            await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} leading divider`, 'start');
             await sendTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
               message_thread_id: postDeleteThreadId,
