@@ -442,6 +442,11 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             }, `${label} delete content`);
           }
           if (deletion.ok) {
+            await sendTelegramMessageWithFallback(baseUrl, {
+              chat_id: callbackChatId,
+              message_thread_id: cq.message?.message_thread_id || undefined,
+              text: bodyText,
+            }, `${label} post-delete notice`);
             return;
           }
         }
