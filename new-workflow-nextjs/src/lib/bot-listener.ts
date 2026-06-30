@@ -961,12 +961,20 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const nghiemThuHeaderText = buildApprovalHeaderText(autoSetup, log);
           await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, nghiemThuHeaderText, `✅ Đã nghiệm thu — ${senderFullName}`);
 
-          const finalHeader = withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
+          // When the final group is the same chat as the approval group (common
+          // setup), the master status card sitting right above already shows
+          // the content + who confirmed it — so reply to it instead of
+          // repeating everything, and keep the header to just the essentials.
+          const finalSameChatAsApproval = normalizeComparableChatId(autoSetup.finalGroupId) === normalizeComparableChatId(autoSetup.approvalGroupId);
+          const finalHeader = finalSameChatAsApproval
+            ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`
+            : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
           await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
             text: finalHeader,
+            reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
           }, 'final header');
 
           const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
