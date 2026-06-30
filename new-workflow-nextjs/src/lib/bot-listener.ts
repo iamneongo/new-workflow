@@ -876,14 +876,12 @@ async function handleBotUpdate(update: any) {
           }, 'superseded source message');
         }
 
-        await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: msg.chat.id,
-          message_thread_id: msg.message_thread_id || undefined,
-          reply_to_message_id: msg.message_id,
-          text: options.isEdit
-            ? '✅ Bot đã ghi nhận tin nhắn đã sửa và tạo lại báo cáo theo nội dung mới.'
-            : '✅ Bot đã nhận phần bổ sung và tạo lại yêu cầu mới theo tin trả lời này.',
-        }, options.isEdit ? 'source edit refresh ack' : 'source reply refresh ack');
+        await reactToTelegramMessage(
+          baseUrl,
+          msg.chat.id,
+          msg.message_id,
+          options.isEdit ? 'source edit refresh ack' : 'source reply refresh ack'
+        );
 
         await handleBotMessageTrigger(msg, p, token, undefined, {
           forceProcess: true,
@@ -965,12 +963,7 @@ async function handleBotUpdate(update: any) {
             continue;
           }
 
-          await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: msg.chat.id,
-            message_thread_id: msg.message_thread_id || undefined,
-            reply_to_message_id: msg.message_id,
-            text: '✅ Bot đã nhận phản hồi nghiệm thu và đang chuyển đến nhóm tổng hợp.',
-          }, 'delivery reply ack');
+          await reactToTelegramMessage(baseUrl, msg.chat.id, msg.message_id, 'delivery reply ack');
 
           const finalHeader = `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
           await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
@@ -2255,6 +2248,25 @@ async function deleteTelegramMessage(
   const result = await sendTelegramJson(baseUrl, 'deleteMessage', payload);
   if (!result.ok) {
     console.warn(`[BotListener] Failed to delete ${label}: ${result.description || 'unknown error'}`);
+  }
+  return result;
+}
+
+// React to a message (e.g. ❤️) instead of sending a separate ack text message.
+async function reactToTelegramMessage(
+  baseUrl: string,
+  chatId: string | number,
+  messageId: number,
+  label: string,
+  emoji: string = '❤'
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const result = await sendTelegramJson(baseUrl, 'setMessageReaction', {
+    chat_id: chatId,
+    message_id: messageId,
+    reaction: [{ type: 'emoji', emoji }],
+  });
+  if (!result.ok) {
+    console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
 }
