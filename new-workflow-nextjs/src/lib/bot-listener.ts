@@ -474,7 +474,8 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}\n\n🏭 Hãy chọn nhà cung ứng:`, {
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+            await showTransientApprovalNote(baseUrl, log, autoSetup.approvalGroupId, headerText, '🏭 Hãy chọn nhà cung ứng:', {
               inline_keyboard: supplierRoutes.map((route) => ([
                 { text: route.name, callback_data: `supplier_select:${logId}:${route.id}` },
               ])),
@@ -1803,6 +1804,36 @@ async function appendApprovalStatusLine(
   }
   await p.query('UPDATE workflow_logs SET status_log = $1 WHERE id = $2', [statusBlock, log.id]);
   log.status_log = statusBlock;
+}
+
+// Show a temporary instruction (e.g. "Hãy chọn nhà cung ứng:") below the
+// persisted status lines, without saving it into status_log — so it
+// disappears on its own once the next real status line is appended instead
+// of lingering forever in the history.
+async function showTransientApprovalNote(
+  baseUrl: string,
+  log: any,
+  approvalGroupId: string | undefined | null,
+  headerText: string,
+  transientNote: string,
+  replyMarkup?: any
+): Promise<void> {
+  const existingLines = typeof log.status_log === 'string' && log.status_log.trim()
+    ? log.status_log.split('\n').filter(Boolean)
+    : [];
+  const statusBlock = existingLines.join('\n');
+  const fullText = statusBlock
+    ? `${headerText}\n\n📋 *Trạng thái:*\n${statusBlock}\n\n${transientNote}`
+    : `${headerText}\n\n${transientNote}`;
+
+  if (log.approval_msg_id && approvalGroupId) {
+    await editTelegramMessageWithFallback(baseUrl, {
+      chat_id: approvalGroupId,
+      message_id: log.approval_msg_id,
+      text: fullText,
+      reply_markup: replyMarkup || { inline_keyboard: [] },
+    }, 'approval transient note');
+  }
 }
 
 function formatRejectCustomMessagePlain(
