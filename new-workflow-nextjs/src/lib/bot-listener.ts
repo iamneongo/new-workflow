@@ -374,7 +374,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         void handleBotUpdate(representative, allIds).catch((err: any) => {
           console.error('[BotListener] Unhandled buffered reply album error:', err?.message || err);
         });
-      }, 1000);
+      }, 3000);
       return;
     }
   }
@@ -1184,7 +1184,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           } catch (err: any) {
             console.error('[BotListener] Error in media group debounce timer:', err?.message || err);
           }
-        }, 1000);
+        }, 3000);
       } else {
         await handleBotMessageTrigger(msg, p, token);
       }
