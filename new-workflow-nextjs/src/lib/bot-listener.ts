@@ -851,8 +851,11 @@ async function handleBotUpdate(update: any) {
     ): Promise<boolean> => {
       const chatId = msg.chat.id.toString();
       const replyThreadId = normalizeThreadId(msg.message_thread_id);
+      // Match either the exact message replied to, or (since users often keep
+      // replying to the very first/original message instead of their latest
+      // reply) any log that shares the same thread root — picking the newest.
       const sourceReplyLogRes = await p.query(
-        'SELECT * FROM workflow_logs WHERE original_msg_id = $1 ORDER BY id DESC',
+        'SELECT * FROM workflow_logs WHERE original_msg_id = $1 OR thread_root_msg_id = $1 ORDER BY id DESC',
         [sourceMsgId]
       );
       if (sourceReplyLogRes.rows.length === 0) return false;
@@ -918,6 +921,7 @@ async function handleBotUpdate(update: any) {
         await handleBotMessageTrigger(msg, p, token, undefined, {
           forceProcess: true,
           overrideOriginalText: refreshedOriginalText,
+          threadRootMsgId: log.thread_root_msg_id ?? log.original_msg_id,
         });
         return true;
       }
@@ -1178,6 +1182,7 @@ async function handleBotMessageTrigger(
   options?: {
     forceProcess?: boolean;
     overrideOriginalText?: string;
+    threadRootMsgId?: number;
   }
 ): Promise<void> {
   const rawChatId = msg?.chat?.id?.toString?.() ?? '';
@@ -1338,11 +1343,11 @@ async function handleBotMessageTrigger(
         : sourceMessageId.toString();
 
       const logRes = await p.query(
-        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status, thread_root_msg_id)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
          ON CONFLICT (automation_id, original_msg_id) DO NOTHING
          RETURNING id`,
-        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText]
+        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText, options?.threadRootMsgId ?? sourceMessageId]
       );
       if (logRes.rows.length === 0) {
         emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (ON CONFLICT).`, {
