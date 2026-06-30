@@ -612,7 +612,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }
 
           void (async () => {
-          const supplyText = `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`;
+          const supplyText = withProjectTag(log.original_text, `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
           await sendDividerMessageIfNeeded(baseUrl, selectedRoute.groupId, selectedRoute.threadId || undefined, `supplier route ${selectedRoute.name}`);
           const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
             chat_id: selectedRoute.groupId,
@@ -777,7 +777,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
-        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nNội dung yêu cầu: ${log.original_text || '[Media]'}\n\nVật tư đang được vận chuyển đến công trình.`;
+        const deliveryText = withProjectTag(log.original_text, `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nNội dung yêu cầu: ${log.original_text || '[Media]'}\n\nVật tư đang được vận chuyển đến công trình.`);
         await sendDividerMessageIfNeeded(baseUrl, autoSetup.deliveryGroupId, autoSetup.deliveryThreadId || undefined, 'delivery notice');
         const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: autoSetup.deliveryGroupId,
@@ -856,9 +856,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             step: 'supplier-select',
           });
         }
-        const rejectText = isChange
+        const rejectText = withProjectTag(log.original_text, isChange
           ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`
-          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
+          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`);
         await sendDividerMessageIfNeeded(baseUrl, isChange ? cq.message.chat.id : rejectTarget.groupId, isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined), 'reject/change notice');
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
@@ -1037,7 +1037,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           await reactToTelegramMessage(baseUrl, msg.chat.id, msg.message_id, 'delivery reply ack');
 
-          const finalHeader = `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
+          const finalHeader = withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
           await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
@@ -1122,7 +1122,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             ? log.original_sender_name.trim()
             : 'Kh\u00f4ng r\u00f5';
           const originalRequestText = log.original_text || '[Media]';
-          const enrichedRelayHeader = `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Yêu cầu ban đầu từ:* ${originalSenderName}\n*Nội dung yêu cầu ban đầu:* ${originalRequestText}\n\n*Người đang phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới là tin reply gốc được bot chuyển tiếp lại.`;
+          const enrichedRelayHeader = withProjectTag(log.original_text, `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Yêu cầu ban đầu từ:* ${originalSenderName}\n*Nội dung yêu cầu ban đầu:* ${originalRequestText}\n\n*Người đang phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới là tin reply gốc được bot chuyển tiếp lại.`);
           const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
           replyHandled = true;
@@ -1481,11 +1481,11 @@ async function handleBotMessageTrigger(
     const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
       chat_id: listener.approvalGroupId,
       message_thread_id: listener.approvalThreadId || undefined,
-      text: formatApprovalCustomMessagePlain(
+      text: withProjectTag(originalText, formatApprovalCustomMessagePlain(
         approvalTopicConfig.approvalCustomMessage,
         senderName,
         originalText
-      ),
+      )),
       reply_markup: {
         inline_keyboard: [
           [
@@ -1805,6 +1805,22 @@ function formatApprovalCustomMessagePlain(
   return base
     .replaceAll('{{senderName}}', senderName)
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
+// Pull a short scannable "công trình" tag (the "CT: ..." line, or the first
+// non-empty line as fallback) out of the source text so busy groups can tell
+// requests apart at a glance without reading the full content.
+function extractProjectTag(text: string): string {
+  if (!text) return '';
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const ctLine = lines.find((l) => /^ct\s*[:.]/i.test(l));
+  const tagLine = ctLine || lines[0] || '';
+  return tagLine.length > 70 ? `${tagLine.slice(0, 67)}...` : tagLine;
+}
+
+function withProjectTag(originalText: string, body: string): string {
+  const tag = extractProjectTag(originalText);
+  return tag ? `🏗️ *${tag}*\n${body}` : body;
 }
 
 function formatRejectCustomMessagePlain(
