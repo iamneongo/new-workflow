@@ -967,7 +967,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           // repeating everything, and keep the header to just the essentials.
           const finalSameChatAsApproval = normalizeComparableChatId(autoSetup.finalGroupId) === normalizeComparableChatId(autoSetup.approvalGroupId);
           const finalHeader = finalSameChatAsApproval
-            ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`
+            ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*`
             : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
           await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
           await sendTelegramMessageWithFallback(baseUrl, {
