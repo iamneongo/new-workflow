@@ -1413,11 +1413,11 @@ async function handleBotMessageTrigger(
     const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
       chat_id: listener.approvalGroupId,
       message_thread_id: listener.approvalThreadId || undefined,
-      text: withProjectTag(originalText, formatApprovalCustomMessagePlain(
+      text: withProjectTag(originalText, embedOriginalContent(formatApprovalCustomMessagePlain(
         approvalTopicConfig.approvalCustomMessage,
         senderName,
         originalText
-      )),
+      ), originalText)),
       reply_markup: {
         inline_keyboard: [
           [
@@ -1773,6 +1773,17 @@ function withProjectTag(originalText: string, body: string): string {
 // Build the fixed "header" portion (project tag + custom approval message) of
 // the single status message tracked per request, so it can be recomputed
 // identically every time the status block is appended to.
+// Always show the original content explicitly below the custom message,
+// regardless of whether the template references {{originalText}} — text-only
+// requests no longer get a separate forwarded/copied content message, so this
+// is the only place the content is visible (both on the initial prompt and
+// every status-card edit after).
+function embedOriginalContent(customMessage: string, originalText: string): string {
+  if (!originalText) return `${customMessage}\n\n[Hình ảnh/Tài liệu]`;
+  if (customMessage.includes(originalText)) return customMessage;
+  return `${customMessage}\n\n${originalText}`;
+}
+
 function buildApprovalHeaderText(autoSetup: any, log: any): string {
   const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
   const customMessage = formatApprovalCustomMessagePlain(
@@ -1780,14 +1791,7 @@ function buildApprovalHeaderText(autoSetup: any, log: any): string {
     log.original_sender_name || '',
     log.original_text || ''
   );
-  // Always show the original content explicitly, regardless of whether the
-  // custom message template references {{originalText}} — there's no
-  // separate forwarded copy anymore for requests that go through the vật tư
-  // (supplier) flow, so this is the only place it's visible.
-  const contentBlock = log.original_text
-    ? (customMessage.includes(log.original_text) ? '' : `\n\n${log.original_text}`)
-    : '\n\n[Hình ảnh/Tài liệu]';
-  return withProjectTag(log.original_text, `${customMessage}${contentBlock}`);
+  return withProjectTag(log.original_text, embedOriginalContent(customMessage, log.original_text || ''));
 }
 
 // Append one line to the request's running status log and edit the single
