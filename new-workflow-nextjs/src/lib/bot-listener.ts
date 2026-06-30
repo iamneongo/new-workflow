@@ -436,6 +436,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         repostContent?: { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' }
       ) => {
         if (!callbackChatId || !callbackMessageId) return;
+        const postDeleteThreadId = cq.message?.message_thread_id || undefined;
         if (hideAfterAction) {
           const deletion = await deleteTelegramMessage(baseUrl, {
             chat_id: callbackChatId,
@@ -448,7 +449,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             }, `${label} delete content`);
           }
           if (deletion.ok) {
-            const postDeleteThreadId = cq.message?.message_thread_id || undefined;
             await sendTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
               message_thread_id: postDeleteThreadId,
@@ -464,6 +464,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 message_ids: repostContent.msgIds,
               }, `${label} post-delete content`);
             }
+            await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`);
             return;
           }
         }
@@ -473,6 +474,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           text: `${originalCleanText}\n\n${bodyText}`,
           reply_markup: { inline_keyboard: [] },
         }, label);
+        await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`);
       };
       callbackFailureReporter = updateCallbackStatus;
       try {
