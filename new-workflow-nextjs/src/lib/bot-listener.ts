@@ -1060,6 +1060,30 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       }
     }
 
+    // 3b. Reply attempting "nghiệm thu" on a vật tư request that was never
+    // agreed/completed (e.g. it was rejected, changed, or still pending):
+    // remove any reaction to signal it's invalid and don't continue the flow.
+    if (update.message && update.message.reply_to_message && !replyHandled) {
+      const msg = update.message;
+      const replyToMsgId = msg.reply_to_message.message_id;
+      const notAgreedLogRes = await p.query(
+        `SELECT * FROM workflow_logs
+         WHERE (original_msg_id = $1 OR delivery_msg_id = $1)
+           AND supply_msg_id IS NOT NULL
+           AND status NOT IN ('supply_agreed', 'completed')`,
+        [replyToMsgId]
+      );
+      if (notAgreedLogRes.rows.length > 0) {
+        const log = notAgreedLogRes.rows[0];
+        replyHandled = true;
+        await unreactTelegramMessage(baseUrl, msg.chat.id, msg.message_id, 'nghiệm thu reply on unagreed supply request');
+        emitListenerLog('warn', `Bỏ qua reply nghiệm thu vì yêu cầu vật tư #${log.id} chưa được đồng ý cấp (status hiện tại: ${log.status}).`, {
+          automationId: log.automation_id,
+          step: 'delivery-reply',
+        });
+      }
+    }
+
     // 4. Reply to "supplier requested change" notice
     if (update.message && update.message.reply_to_message) {
       const msg = update.message;
@@ -2358,6 +2382,25 @@ async function reactToTelegramMessage(
   });
   if (!result.ok) {
     console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
+  }
+  return result;
+}
+
+// Remove any reaction the bot previously set on a message (used to signal "this
+// reply is invalid / can't proceed" instead of silently ignoring it).
+async function unreactTelegramMessage(
+  baseUrl: string,
+  chatId: string | number,
+  messageId: number,
+  label: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const result = await sendTelegramJson(baseUrl, 'setMessageReaction', {
+    chat_id: chatId,
+    message_id: messageId,
+    reaction: [],
+  });
+  if (!result.ok) {
+    console.warn(`[BotListener] Failed to clear reaction on ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
 }
