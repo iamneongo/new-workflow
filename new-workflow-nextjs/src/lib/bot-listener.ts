@@ -1767,11 +1767,19 @@ function withProjectTag(originalText: string, body: string): string {
 // identically every time the status block is appended to.
 function buildApprovalHeaderText(autoSetup: any, log: any): string {
   const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
-  return withProjectTag(log.original_text, formatApprovalCustomMessagePlain(
+  const customMessage = formatApprovalCustomMessagePlain(
     approvalTopicConfig.approvalCustomMessage,
     log.original_sender_name || '',
     log.original_text || ''
-  ));
+  );
+  // Always show the original content explicitly, regardless of whether the
+  // custom message template references {{originalText}} — there's no
+  // separate forwarded copy anymore for requests that go through the vật tư
+  // (supplier) flow, so this is the only place it's visible.
+  const contentBlock = log.original_text
+    ? (customMessage.includes(log.original_text) ? '' : `\n\n${log.original_text}`)
+    : '\n\n[Hình ảnh/Tài liệu]';
+  return withProjectTag(log.original_text, `${customMessage}${contentBlock}`);
 }
 
 // Append one line to the request's running status log and edit the single
