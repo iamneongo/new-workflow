@@ -428,13 +428,19 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           reply_markup: { inline_keyboard: [] },
         }, label);
       };
-      const finalizeCallbackStatus = async (bodyText: string, label: string, hideAfterAction: boolean) => {
+      const finalizeCallbackStatus = async (bodyText: string, label: string, hideAfterAction: boolean, extraMsgIdsToDelete: number[] = []) => {
         if (!callbackChatId || !callbackMessageId) return;
         if (hideAfterAction) {
           const deletion = await deleteTelegramMessage(baseUrl, {
             chat_id: callbackChatId,
             message_id: callbackMessageId,
           }, `${label} delete`);
+          for (const extraMsgId of extraMsgIdsToDelete) {
+            await deleteTelegramMessage(baseUrl, {
+              chat_id: callbackChatId,
+              message_id: extraMsgId,
+            }, `${label} delete content`);
+          }
           if (deletion.ok) {
             return;
           }
@@ -514,7 +520,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
                 [selectionData.result.message_id, logId]
               );
-              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage);
+              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
             }
             return;
           }
@@ -530,7 +536,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage);
+            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
             return;
           }
 
@@ -572,7 +578,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
-          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage);
+          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -2400,6 +2406,14 @@ async function reactToTelegramMessage(
     console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
+}
+
+function parseMsgIdList(value: unknown): number[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  return value
+    .split(',')
+    .map((id) => Number(id.trim()))
+    .filter((id) => Number.isInteger(id) && id > 0);
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
