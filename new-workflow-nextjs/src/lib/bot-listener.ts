@@ -428,7 +428,13 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           reply_markup: { inline_keyboard: [] },
         }, label);
       };
-      const finalizeCallbackStatus = async (bodyText: string, label: string, hideAfterAction: boolean, extraMsgIdsToDelete: number[] = []) => {
+      const finalizeCallbackStatus = async (
+        bodyText: string,
+        label: string,
+        hideAfterAction: boolean,
+        extraMsgIdsToDelete: number[] = [],
+        repostContent?: { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' }
+      ) => {
         if (!callbackChatId || !callbackMessageId) return;
         if (hideAfterAction) {
           const deletion = await deleteTelegramMessage(baseUrl, {
@@ -442,11 +448,22 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             }, `${label} delete content`);
           }
           if (deletion.ok) {
+            const postDeleteThreadId = cq.message?.message_thread_id || undefined;
             await sendTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
-              message_thread_id: cq.message?.message_thread_id || undefined,
+              message_thread_id: postDeleteThreadId,
               text: bodyText,
             }, `${label} post-delete notice`);
+            if (repostContent && repostContent.msgIds.length > 0) {
+              const repostMethod: 'copyMessage' | 'forwardMessage' = repostContent.mode === 'copy' ? 'copyMessage' : 'forwardMessage';
+              await sendTelegramMethodWithFallback(baseUrl, repostMethod, {
+                chat_id: callbackChatId,
+                message_thread_id: postDeleteThreadId,
+                from_chat_id: repostContent.fromChatId,
+                message_id: repostContent.msgIds[0],
+                message_ids: repostContent.msgIds,
+              }, `${label} post-delete content`);
+            }
             return;
           }
         }
@@ -525,7 +542,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
                 [selectionData.result.message_id, logId]
               );
-              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
+              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
             }
             return;
           }
@@ -541,7 +558,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
+            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
             return;
           }
 
@@ -583,7 +600,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
-          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids));
+          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -2419,6 +2436,17 @@ function parseMsgIdList(value: unknown): number[] {
     .split(',')
     .map((id) => Number(id.trim()))
     .filter((id) => Number.isInteger(id) && id > 0);
+}
+
+function buildOriginalRepost(log: any, mode: ApprovalMessageMode): { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' } {
+  const msgIds = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+    ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+    : [Number(log.original_msg_id)];
+  return {
+    fromChatId: log.original_chat_id,
+    msgIds,
+    mode: mode === 'copy' ? 'copy' : 'forward',
+  };
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
