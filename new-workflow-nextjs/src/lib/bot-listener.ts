@@ -1152,8 +1152,13 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
     // 2. New message trigger handler
     if (update.message && !replyHandled) {
       const msg = update.message;
-      console.log(`[BotListener] New message #${msg.message_id}, media_group_id=${msg.media_group_id ?? 'none'}, hasPhoto=${!!msg.photo}`);
-      if (msg.media_group_id) {
+      console.log(`[BotListener] New message #${msg.message_id}, media_group_id=${msg.media_group_id ?? 'none'}, hasPhoto=${!!msg.photo}, forcedAlbumMsgIds=${forcedAlbumMsgIds ? forcedAlbumMsgIds.join(',') : 'none'}`);
+      if (forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0) {
+        // Already collected the full album via the reply-album buffer above —
+        // don't re-buffer from scratch with just this one representative
+        // message, or the rest of the album gets silently dropped.
+        await handleBotMessageTrigger(msg, p, token, forcedAlbumMsgIds);
+      } else if (msg.media_group_id) {
         const mgId = String(msg.media_group_id);
         let buffer = global.__mediaGroupBuffers!.get(mgId);
         if (buffer) {
