@@ -425,74 +425,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           reply_markup: { inline_keyboard: [] },
         }, label);
       };
-      const finalizeCallbackStatus = async (
-        bodyText: string,
-        label: string,
-        hideAfterAction: boolean,
-        extraMsgIdsToDelete: number[] = [],
-        repostContent?: { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' },
-        trackForLogId?: number
-      ) => {
-        if (!callbackChatId || !callbackMessageId) return;
-        const postDeleteThreadId = cq.message?.message_thread_id || undefined;
-        const postNoticeMsgIds: number[] = [];
-        if (hideAfterAction) {
-          const deletion = await deleteTelegramMessage(baseUrl, {
-            chat_id: callbackChatId,
-            message_id: callbackMessageId,
-          }, `${label} delete`);
-          for (const extraMsgId of extraMsgIdsToDelete) {
-            await deleteTelegramMessage(baseUrl, {
-              chat_id: callbackChatId,
-              message_id: extraMsgId,
-            }, `${label} delete content`);
-          }
-          if (deletion.ok) {
-            const startDividerId = await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} leading divider`, 'start');
-            if (startDividerId) postNoticeMsgIds.push(startDividerId);
-            const noticeData = await sendTelegramMessageWithFallback(baseUrl, {
-              chat_id: callbackChatId,
-              message_thread_id: postDeleteThreadId,
-              text: bodyText,
-            }, `${label} post-delete notice`);
-            if (noticeData.ok) postNoticeMsgIds.push(noticeData.result.message_id);
-            if (repostContent && repostContent.msgIds.length > 0) {
-              const repostMethod: 'copyMessage' | 'forwardMessage' = repostContent.mode === 'copy' ? 'copyMessage' : 'forwardMessage';
-              const repostData = await sendTelegramMethodWithFallback(baseUrl, repostMethod, {
-                chat_id: callbackChatId,
-                message_thread_id: postDeleteThreadId,
-                from_chat_id: repostContent.fromChatId,
-                message_id: repostContent.msgIds[0],
-                message_ids: repostContent.msgIds,
-              }, `${label} post-delete content`);
-              if (repostData.ok) {
-                const repostedIds: number[] = Array.isArray(repostData.result)
-                  ? repostData.result.map((r: any) => r?.message_id).filter((id: any): id is number => Number.isInteger(id))
-                  : Number.isInteger(repostData.result?.message_id)
-                    ? [repostData.result.message_id]
-                    : [];
-                postNoticeMsgIds.push(...repostedIds);
-              }
-            }
-            const endDividerId = await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`, 'end');
-            if (endDividerId) postNoticeMsgIds.push(endDividerId);
-            if (trackForLogId && postNoticeMsgIds.length > 0) {
-              await p.query(
-                "UPDATE workflow_logs SET post_notice_msg_ids = $1 WHERE id = $2",
-                [postNoticeMsgIds.join(','), trackForLogId]
-              );
-            }
-            return;
-          }
-        }
-        await editTelegramMessageWithFallback(baseUrl, {
-          chat_id: callbackChatId,
-          message_id: callbackMessageId,
-          text: `${originalCleanText}\n\n${bodyText}`,
-          reply_markup: { inline_keyboard: [] },
-        }, label);
-        await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`, 'end');
-      };
       callbackFailureReporter = updateCallbackStatus;
       try {
         if (callbackChatId && callbackMessageId) {
@@ -527,7 +459,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '');
-          const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
+          const headerText = buildApprovalHeaderText(autoSetup, log);
 
           const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
           const listenMatch = matchesSupplyListenScope(autoSetup, log);
@@ -538,31 +470,15 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           if (listenMatch.matched && supplierRoutes.length > 0) {
             await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
-
-            const selectionText = `🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`;
             emitListenerLog('info', `Kênh/topic lắng nghe khớp: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await sendDividerMessageIfNeeded(baseUrl, cq.message.chat.id, cq.message.message_thread_id || autoSetup.approvalThreadId || undefined, 'supplier selection prompt');
-            const selectionData = await sendTelegramMessageWithFallback(baseUrl, {
-              chat_id: cq.message.chat.id,
-              message_thread_id: cq.message.message_thread_id || autoSetup.approvalThreadId || undefined,
-              text: selectionText,
-              reply_markup: {
-                inline_keyboard: supplierRoutes.map((route) => ([
-                  { text: route.name, callback_data: `supplier_select:${logId}:${route.id}` },
-                ])),
-              }
-            }, 'supplier selection prompt');
-
-            if (selectionData.ok) {
-              await p.query(
-                "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
-                [selectionData.result.message_id, logId]
-              );
-              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
-            }
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}\n\n🏭 Hãy chọn nhà cung ứng:`, {
+              inline_keyboard: supplierRoutes.map((route) => ([
+                { text: route.name, callback_data: `supplier_select:${logId}:${route.id}` },
+              ])),
+            });
             return;
           }
 
@@ -577,7 +493,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
             return;
           }
 
@@ -592,7 +508,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, sourceThreadId);
           const rejectTopicConfig = resolveRejectTopicConfig(autoSetup, sourceThreadId);
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
-          const hideApprovalMessage = approvalTopicConfig.approvalActionConfig.hideAfterAction === true;
+          const headerText = buildApprovalHeaderText(autoSetup, log);
 
           // Send reject notification
           const rejectTarget = resolveApprovalRejectTarget(autoSetup);
@@ -619,7 +535,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
-          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`);
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -629,7 +545,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const routeId = parts[2];
           const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
           const selectedRoute = supplierRoutes.find((route) => route.id === routeId);
-          const hideSupplierSelectionMessage = autoSetup.supplierSelectionHideAfterAction === true;
+          const supplierSelectHeaderText = buildApprovalHeaderText(autoSetup, log);
           if (!selectedRoute) {
             await updateCallbackStatus('❌ Nhà cung ứng đã chọn không còn hợp lệ.', 'callback invalid supplier');
             return;
@@ -645,22 +561,8 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             step: 'supplier-select',
           });
 
-          if (callbackChatId && callbackMessageId) {
-            if (hideSupplierSelectionMessage) {
-              await finalizeCallbackStatus(`✅ *ĐÃ CHỌN NHÀ CUNG ỨNG:* ${selectedRoute.name}`, 'supplier final ack', true);
-            } else {
-              await editTelegramMessageWithFallback(baseUrl, {
-              chat_id: callbackChatId,
-              message_id: callbackMessageId,
-              text: `${originalCleanText}\n\n⏳ Đã chọn ${selectedRoute.name}, đang chuyển nội dung...`,
-              reply_markup: { inline_keyboard: [] },
-              }, 'supplier ack');
-            }
-          }
-
           void (async () => {
           const supplyText = withProjectTag(log.original_text, `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
-          const supplyDividerMsgId = await sendDividerMessageIfNeeded(baseUrl, selectedRoute.groupId, selectedRoute.threadId || undefined, `supplier route ${selectedRoute.name}`);
           const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
             chat_id: selectedRoute.groupId,
             message_thread_id: selectedRoute.threadId || undefined,
@@ -702,14 +604,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            if (callbackChatId && callbackMessageId) {
-              await editTelegramMessageWithFallback(baseUrl, {
-                chat_id: callbackChatId,
-                message_id: callbackMessageId,
-                text: `${originalCleanText}\n\n❌ Không gửi được prompt đến ${selectedRoute.name}.${promptHint ? `\n${promptHint}` : ''}`,
-                reply_markup: { inline_keyboard: [] },
-              }, 'supplier prompt fail');
-            }
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `❌ Không gửi được prompt đến ${selectedRoute.name}.${promptHint ? ` ${promptHint}` : ''}`);
             return;
           }
 
@@ -721,9 +616,8 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                  selected_supplier_group_id = $3,
                  selected_supplier_thread_id = $4,
                  supply_prompt_group_id = $5,
-                 supply_prompt_thread_id = $6,
-                 supply_divider_msg_id = $7
-             WHERE id = $8`,
+                 supply_prompt_thread_id = $6
+             WHERE id = $7`,
             [
               promptData.result.message_id,
               selectedRoute.id,
@@ -731,7 +625,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               selectedRoute.threadId,
               selectedRoute.groupId,
               selectedRoute.threadId,
-              supplyDividerMsgId,
               logId,
             ]
           );
@@ -745,32 +638,11 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            if (callbackChatId && callbackMessageId) {
-              await editTelegramMessageWithFallback(baseUrl, {
-                chat_id: callbackChatId,
-                message_id: callbackMessageId,
-                text: `${originalCleanText}\n\n⚠️ Đã chọn ${selectedRoute.name}, nhưng chưa chuyển được nội dung.${contentHint ? `\n${contentHint}` : ''}`,
-                reply_markup: { inline_keyboard: [] },
-              }, 'supplier content fail');
-            }
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `⚠️ Đã chọn ${selectedRoute.name}, nhưng chưa chuyển được nội dung.${contentHint ? ` ${contentHint}` : ''}`);
             return;
           }
 
-          if (callbackChatId && callbackMessageId) {
-            if (hideSupplierSelectionMessage) {
-              await deleteTelegramMessage(baseUrl, {
-                chat_id: callbackChatId,
-                message_id: callbackMessageId,
-              }, 'supplier final ack');
-            } else {
-              await editTelegramMessageWithFallback(baseUrl, {
-              chat_id: callbackChatId,
-              message_id: callbackMessageId,
-              text: `${originalCleanText}\n\n✅ *ĐÃ CHỌN NHÀ CUNG ỨNG:* ${selectedRoute.name}`,
-              reply_markup: { inline_keyboard: [] },
-            }, 'supplier final ack');
-            }
-          }
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `✅ Đã chọn NCC: ${selectedRoute.name}`);
         })().catch((err: any) => {
           emitListenerLog('error', `Xử lý nhà cung ứng "${selectedRoute.name}" lỗi: ${err.message}`, {
             automationId: log.automation_id,
@@ -808,7 +680,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           // Đã được một lần xử lý khác (vd. update bị Telegram gửi lại sau khi service restart) giành xử lý trước.
           return;
         }
-        const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
+        const supplyAgreeHeaderText = buildApprovalHeaderText(autoSetup, log);
 
         await fetch(`${baseUrl}/editMessageText`, {
           method: 'POST',
@@ -842,7 +714,8 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             automationId: log.automation_id,
             step: 'delivery',
           });
-          await finalizeCallbackStatus(`✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`, 'supply agree final', hideSupplyPromptMessage, parseMsgIdList(undefined, log.supply_divider_msg_id));
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `✅ Đã đồng ý cấp vật tư — ${userFullName}`);
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `📦 Đang giao đến công trình`);
         } else {
           emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
             automationId: log.automation_id,
@@ -871,7 +744,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
         const isChange = action === 'supply_change';
         const newStatus = isChange ? 'supply_changed' : 'supply_rejected';
-        const hideSupplyPromptMessage = autoSetup.supplyPromptHideAfterAction === true;
+        const supplyDecisionHeaderText = buildApprovalHeaderText(autoSetup, log);
 
         const supplyDecisionClaim = await p.query(
           "UPDATE workflow_logs SET status = $1 WHERE id = $2 AND status = 'supply_sent' RETURNING id",
@@ -917,7 +790,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         if (isChange && rejectData.ok) {
           await p.query("UPDATE workflow_logs SET supply_change_msg_id = $1 WHERE id = $2", [rejectData.result.message_id, logId]);
         }
-        await finalizeCallbackStatus(`${statusLabel} bởi ${userFullName}`, 'supply decision final', hideSupplyPromptMessage, parseMsgIdList(undefined, log.supply_divider_msg_id));
+        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyDecisionHeaderText, `${statusLabel} bởi ${userFullName}`);
       }
       } finally {
         global.__processingCallbackActions!.delete(actionKey);
@@ -1108,6 +981,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }
 
           await reactToTelegramMessage(baseUrl, msg.chat.id, msg.message_id, 'delivery reply ack');
+
+          const nghiemThuHeaderText = buildApprovalHeaderText(autoSetup, log);
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, nghiemThuHeaderText, `✅ Đã nghiệm thu — ${senderFullName}`);
 
           const finalHeader = withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
           await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
@@ -1884,6 +1760,50 @@ function withProjectTag(originalText: string, body: string): string {
   return tag ? `🏗️ *${tag}*\n${body}` : body;
 }
 
+// Build the fixed "header" portion (project tag + custom approval message) of
+// the single status message tracked per request, so it can be recomputed
+// identically every time the status block is appended to.
+function buildApprovalHeaderText(autoSetup: any, log: any): string {
+  const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
+  return withProjectTag(log.original_text, formatApprovalCustomMessagePlain(
+    approvalTopicConfig.approvalCustomMessage,
+    log.original_sender_name || '',
+    log.original_text || ''
+  ));
+}
+
+// Append one line to the request's running status log and edit the single
+// tracked message (log.approval_msg_id) in place, instead of deleting and
+// recreating messages. Mutates log.status_log so subsequent calls within the
+// same handler invocation see the latest accumulated text.
+async function appendApprovalStatusLine(
+  p: ReturnType<typeof getPool>,
+  baseUrl: string,
+  log: any,
+  approvalGroupId: string | undefined | null,
+  headerText: string,
+  newLine: string,
+  replyMarkup?: any
+): Promise<void> {
+  const existingLines = typeof log.status_log === 'string' && log.status_log.trim()
+    ? log.status_log.split('\n').filter(Boolean)
+    : [];
+  const updatedLines = [...existingLines, newLine];
+  const statusBlock = updatedLines.join('\n');
+  const fullText = `${headerText}\n\n📋 *Trạng thái:*\n${statusBlock}`;
+
+  if (log.approval_msg_id && approvalGroupId) {
+    await editTelegramMessageWithFallback(baseUrl, {
+      chat_id: approvalGroupId,
+      message_id: log.approval_msg_id,
+      text: fullText,
+      reply_markup: replyMarkup || { inline_keyboard: [] },
+    }, 'approval status update');
+  }
+  await p.query('UPDATE workflow_logs SET status_log = $1 WHERE id = $2', [statusBlock, log.id]);
+  log.status_log = statusBlock;
+}
+
 function formatRejectCustomMessagePlain(
   template: string,
   userFullName: string,
@@ -2461,27 +2381,6 @@ async function reactToTelegramMessage(
     console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
-}
-
-function parseMsgIdList(value: unknown, ...extraIds: unknown[]): number[] {
-  const ids = typeof value === 'string' && value.trim()
-    ? value.split(',').map((id) => Number(id.trim()))
-    : [];
-  for (const extra of extraIds) {
-    if (extra !== null && extra !== undefined) ids.push(Number(extra));
-  }
-  return ids.filter((id) => Number.isInteger(id) && id > 0);
-}
-
-function buildOriginalRepost(log: any, mode: ApprovalMessageMode): { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' } {
-  const msgIds = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
-    ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
-    : [Number(log.original_msg_id)];
-  return {
-    fromChatId: log.original_chat_id,
-    msgIds,
-    mode: mode === 'copy' ? 'copy' : 'forward',
-  };
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
