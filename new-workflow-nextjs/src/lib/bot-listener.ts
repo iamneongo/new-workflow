@@ -435,10 +435,12 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         label: string,
         hideAfterAction: boolean,
         extraMsgIdsToDelete: number[] = [],
-        repostContent?: { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' }
+        repostContent?: { fromChatId: string | number; msgIds: number[]; mode: 'forward' | 'copy' },
+        trackForLogId?: number
       ) => {
         if (!callbackChatId || !callbackMessageId) return;
         const postDeleteThreadId = cq.message?.message_thread_id || undefined;
+        const postNoticeMsgIds: number[] = [];
         if (hideAfterAction) {
           const deletion = await deleteTelegramMessage(baseUrl, {
             chat_id: callbackChatId,
@@ -451,23 +453,40 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             }, `${label} delete content`);
           }
           if (deletion.ok) {
-            await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} leading divider`, 'start');
-            await sendTelegramMessageWithFallback(baseUrl, {
+            const startDividerId = await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} leading divider`, 'start');
+            if (startDividerId) postNoticeMsgIds.push(startDividerId);
+            const noticeData = await sendTelegramMessageWithFallback(baseUrl, {
               chat_id: callbackChatId,
               message_thread_id: postDeleteThreadId,
               text: bodyText,
             }, `${label} post-delete notice`);
+            if (noticeData.ok) postNoticeMsgIds.push(noticeData.result.message_id);
             if (repostContent && repostContent.msgIds.length > 0) {
               const repostMethod: 'copyMessage' | 'forwardMessage' = repostContent.mode === 'copy' ? 'copyMessage' : 'forwardMessage';
-              await sendTelegramMethodWithFallback(baseUrl, repostMethod, {
+              const repostData = await sendTelegramMethodWithFallback(baseUrl, repostMethod, {
                 chat_id: callbackChatId,
                 message_thread_id: postDeleteThreadId,
                 from_chat_id: repostContent.fromChatId,
                 message_id: repostContent.msgIds[0],
                 message_ids: repostContent.msgIds,
               }, `${label} post-delete content`);
+              if (repostData.ok) {
+                const repostedIds: number[] = Array.isArray(repostData.result)
+                  ? repostData.result.map((r: any) => r?.message_id).filter((id: any): id is number => Number.isInteger(id))
+                  : Number.isInteger(repostData.result?.message_id)
+                    ? [repostData.result.message_id]
+                    : [];
+                postNoticeMsgIds.push(...repostedIds);
+              }
             }
-            await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`, 'end');
+            const endDividerId = await sendDividerMessageIfNeeded(baseUrl, callbackChatId, postDeleteThreadId, `${label} trailing divider`, 'end');
+            if (endDividerId) postNoticeMsgIds.push(endDividerId);
+            if (trackForLogId && postNoticeMsgIds.length > 0) {
+              await p.query(
+                "UPDATE workflow_logs SET post_notice_msg_ids = $1 WHERE id = $2",
+                [postNoticeMsgIds.join(','), trackForLogId]
+              );
+            }
             return;
           }
         }
@@ -547,7 +566,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 "UPDATE workflow_logs SET supplier_selection_msg_id = $1 WHERE id = $2",
                 [selectionData.result.message_id, logId]
               );
-              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+              await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
             }
             return;
           }
@@ -563,7 +582,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
-            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+            await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval agree final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
             return;
           }
 
@@ -605,7 +624,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             message_thread_id: rejectTarget.threadId || undefined,
             text: rejectText,
           }, 'reject notice');
-          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode));
+          await finalizeCallbackStatus(`✅ ${approvalDecisionText}`, 'approval reject final', hideApprovalMessage, parseMsgIdList(log.approval_content_msg_ids, log.approval_divider_msg_id), buildOriginalRepost(log, approvalTopicConfig.approvalMessageMode), logId);
 
         } else if (action === 'supplier_select') {
           if (parts.length < 3) {
@@ -979,6 +998,22 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               chat_id: autoSetup.approvalGroupId,
               message_id: contentMsgId,
             }, 'superseded approval content');
+          }
+        }
+
+        // The prompt may have already been approved/rejected and replaced by a
+        // fresh "✅ Đã được chấm công/phê duyệt" notice block (START + notice +
+        // forwarded content + END). Clean that up too so it doesn't linger.
+        if (autoSetup.approvalGroupId && typeof log.post_notice_msg_ids === 'string' && log.post_notice_msg_ids.trim()) {
+          const postNoticeMsgIds = log.post_notice_msg_ids
+            .split(',')
+            .map((id: string) => Number(id.trim()))
+            .filter((id: number) => Number.isInteger(id) && id > 0);
+          for (const postNoticeMsgId of postNoticeMsgIds) {
+            await deleteTelegramMessage(baseUrl, {
+              chat_id: autoSetup.approvalGroupId,
+              message_id: postNoticeMsgId,
+            }, 'superseded post-approval notice');
           }
         }
 
