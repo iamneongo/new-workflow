@@ -1152,18 +1152,21 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
     // 2. New message trigger handler
     if (update.message && !replyHandled) {
       const msg = update.message;
+      console.log(`[BotListener] New message #${msg.message_id}, media_group_id=${msg.media_group_id ?? 'none'}, hasPhoto=${!!msg.photo}`);
       if (msg.media_group_id) {
         const mgId = String(msg.media_group_id);
         let buffer = global.__mediaGroupBuffers!.get(mgId);
         if (buffer) {
           clearTimeout(buffer.timer);
           buffer.messages.push(msg);
+          console.log(`[BotListener] Media group ${mgId}: buffered message #${msg.message_id}, total so far: ${buffer.messages.length}`);
         } else {
           buffer = {
             timer: null as any,
             messages: [msg],
           };
           global.__mediaGroupBuffers!.set(mgId, buffer);
+          console.log(`[BotListener] Media group ${mgId}: started new buffer with message #${msg.message_id}`);
         }
 
         buffer.timer = setTimeout(async () => {
@@ -1174,10 +1177,11 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
             // Sắp xếp theo ID tin nhắn tăng dần
             const sortedMsgs = buf.messages.sort((a: any, b: any) => Number(a.message_id) - Number(b.message_id));
-            
+
             // Lấy tin nhắn có text/caption làm đại diện
             const representativeMsg = sortedMsgs.find((m: any) => m.text || m.caption) || sortedMsgs[0];
             const allMsgIds = sortedMsgs.map((m: any) => Number(m.message_id));
+            console.log(`[BotListener] Media group ${mgId}: firing with ${allMsgIds.length} message(s): ${allMsgIds.join(', ')}`);
 
             // Kích hoạt trigger cho tin nhắn đại diện, kèm theo mảng tất cả message_id của album
             await handleBotMessageTrigger(representativeMsg, p, token, allMsgIds);
