@@ -1441,15 +1441,15 @@ async function handleBotMessageTrigger(
       );
     }
 
-    // Skip forwarding the raw original content into the approval group when
-    // this request is headed into the vật tư (supplier) flow: the single
-    // status card already embeds the full text, and admins repeat-forward it
-    // again per step (supplier, delivery...), so a third copy here is just
-    // clutter. Other flows (e.g. chấm công) still get the forward since their
-    // card header doesn't embed the original text.
-    const willGoToSupplierFlow = matchesSupplyListenScope(listener, { original_chat_id: listener.sourceGroupId, original_thread_id: originalThreadId }).matched
-      && getConfiguredSupplierRoutes(listener).length > 0;
-    if (willGoToSupplierFlow) {
+    // Skip forwarding/copying the raw original content into the approval
+    // group whenever it's plain text: buildApprovalHeaderText already embeds
+    // log.original_text into the status card, so a second copy right below
+    // it is pure duplication. Only text-less requests (photos, documents...)
+    // still need the separate relay since the card can't show media.
+    const hasNonTextMedia = Boolean(
+      mediaGroupMsgIds?.length || msg?.photo || msg?.document || msg?.video || msg?.voice || msg?.audio || msg?.animation
+    );
+    if (!hasNonTextMedia) {
       listener.forwardCount += 1;
       listener.lastForwardTime = Date.now();
       await saveAutomationSetup({
