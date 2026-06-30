@@ -741,7 +741,7 @@ async function handleBotUpdate(update: any) {
           await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
-        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`;
+        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nNội dung yêu cầu: ${log.original_text || '[Media]'}\n\nVật tư đang được vận chuyển đến công trình. Nội dung gốc được chuyển tiếp bên dưới.`;
         await sendDividerMessageIfNeeded(baseUrl, autoSetup.deliveryGroupId, autoSetup.deliveryThreadId || undefined, 'delivery notice');
         const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: autoSetup.deliveryGroupId,
@@ -757,6 +757,18 @@ async function handleBotUpdate(update: any) {
             automationId: log.automation_id,
             step: 'delivery',
           });
+
+          const deliveryOriginalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+            ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+            : [Number(log.original_msg_id)];
+          const deliveryContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+          await sendTelegramMethodWithFallback(baseUrl, deliveryContentMethod, {
+            chat_id: autoSetup.deliveryGroupId,
+            message_thread_id: autoSetup.deliveryThreadId || undefined,
+            from_chat_id: log.original_chat_id,
+            message_id: deliveryOriginalMsgIds[0],
+            message_ids: deliveryOriginalMsgIds,
+          }, 'delivery notice content');
           await finalizeCallbackStatus(`✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`, 'supply agree final', hideSupplyPromptMessage);
         } else {
           emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
