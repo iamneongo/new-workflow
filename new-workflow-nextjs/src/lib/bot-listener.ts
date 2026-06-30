@@ -1847,16 +1847,20 @@ function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
   return [];
 }
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function sendTelegramJson(
   baseUrl: string,
   method: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
+  attempt = 1
 ): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const maxRetries = 3;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
+  const timeout = setTimeout(() => controller.abort(), 12000); // Tăng timeout lên 12s cho các album/ảnh lớn
 
   try {
-    console.log(`[BotListener] Telegram ${method} -> sending...`);
+    console.log(`[BotListener] Telegram ${method} -> sending (attempt ${attempt}/${maxRetries})...`);
     const normalizedPayload = { ...payload };
     if (normalizedPayload.chat_id !== undefined) {
       normalizedPayload.chat_id = await resolveBotApiChatId(String(normalizedPayload.chat_id));
@@ -1871,16 +1875,41 @@ async function sendTelegramJson(
       signal: controller.signal,
     });
 
+    // Xử lý Rate Limit (429) từ Telegram
+    if (res.status === 429) {
+      const data = await res.json() as any;
+      const retryAfter = Number(data?.parameters?.retry_after || 3);
+      console.warn(`[BotListener] Telegram Rate Limit (429) on ${method}. Waiting for ${retryAfter}s before retry.`);
+      if (attempt < maxRetries) {
+        await delay((retryAfter * 1000) + 500);
+        return sendTelegramJson(baseUrl, method, payload, attempt + 1);
+      }
+      return data;
+    }
+
     const data = await res.json() as any;
     if (!data.ok) {
       console.warn(`[BotListener] Telegram ${method} failed:`, data.description || JSON.stringify(data));
+      // Nếu server lỗi tạm thời (HTTP 5xx), thực hiện thử lại
+      if (res.status >= 500 && attempt < maxRetries) {
+        const backoff = Math.pow(2, attempt) * 1000;
+        await delay(backoff);
+        return sendTelegramJson(baseUrl, method, payload, attempt + 1);
+      }
     } else {
       console.log(`[BotListener] Telegram ${method} ok.`);
     }
     return data;
   } catch (error: any) {
-    const message = error?.name === 'AbortError' ? 'request timeout after 10s' : (error?.message || String(error));
-    console.warn(`[BotListener] Telegram ${method} error: ${message}`);
+    const message = error?.name === 'AbortError' ? 'request timeout after 12s' : (error?.message || String(error));
+    console.warn(`[BotListener] Telegram ${method} error (attempt ${attempt}/${maxRetries}): ${message}`);
+    
+    // Thử lại nếu lỗi kết nối mạng (FetchError, Timeout) và chưa vượt quá số lần thử lại
+    if (attempt < maxRetries) {
+      const backoff = Math.pow(2, attempt) * 1000;
+      await delay(backoff);
+      return sendTelegramJson(baseUrl, method, payload, attempt + 1);
+    }
     return { ok: false, description: message };
   } finally {
     clearTimeout(timeout);
