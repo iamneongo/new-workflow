@@ -101,6 +101,9 @@ export default function ChatDetails({
   const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
   const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
   const [approvalHideAfterActionInput, setApprovalHideAfterActionInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction);
+  const [approvalRefreshOnSourceReplyInput, setApprovalRefreshOnSourceReplyInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply);
+  const [approvalDeleteSourceMessageOnReplyInput, setApprovalDeleteSourceMessageOnReplyInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply);
+  const [approvalAttendanceSupplementReplyEnabledInput, setApprovalAttendanceSupplementReplyEnabledInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled);
   const [approvalTopicConfigsInput, setApprovalTopicConfigsInput] = useState<ApprovalTopicConfig[]>([]);
   const [isApprovalMessageDrawerOpen, setIsApprovalMessageDrawerOpen] = useState(false);
   const [isApprovalTopicDrawerOpen, setIsApprovalTopicDrawerOpen] = useState(false);
@@ -246,6 +249,9 @@ export default function ChatDetails({
       setApprovalAgreeResultMessageInput(automation.approvalActionConfig?.agreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
       setApprovalDisagreeResultMessageInput(automation.approvalActionConfig?.disagreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
       setApprovalHideAfterActionInput(automation.approvalActionConfig?.hideAfterAction === true);
+      setApprovalRefreshOnSourceReplyInput(automation.approvalActionConfig?.refreshOnSourceReply === true);
+      setApprovalDeleteSourceMessageOnReplyInput(automation.approvalActionConfig?.deleteSourceMessageOnReply === true);
+      setApprovalAttendanceSupplementReplyEnabledInput(automation.approvalActionConfig?.attendanceSupplementReplyEnabled === true);
       const sourceThreadIds = Array.isArray(automation.sourceThreadIds) && automation.sourceThreadIds.length > 0
         ? automation.sourceThreadIds
         : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
@@ -471,6 +477,9 @@ export default function ChatDetails({
           agreeResultMessage: approvalAgreeResultMessageInput,
           disagreeResultMessage: approvalDisagreeResultMessageInput,
           hideAfterAction: approvalHideAfterActionInput,
+          refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
+          deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
+          attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
         };
         updates.approvalTopicConfigs = approvalTopicConfigsInput;
       }
@@ -578,6 +587,9 @@ export default function ChatDetails({
       || config.approvalActionConfig.agreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage
       || config.approvalActionConfig.disagreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage
       || config.approvalActionConfig.hideAfterAction !== DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction
+      || config.approvalActionConfig.refreshOnSourceReply !== DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply
+      || config.approvalActionConfig.deleteSourceMessageOnReply !== DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply
+      || config.approvalActionConfig.attendanceSupplementReplyEnabled !== DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled
     )
   )).length;
   const rejectTopicManagedCount = sourceThreadIdsInput.length;
@@ -737,6 +749,53 @@ export default function ChatDetails({
               })}
             />
             <span>Ẩn tin nhắn này sau khi đã bấm xử lý xong</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+            <input
+              type="checkbox"
+              checked={config.approvalActionConfig.refreshOnSourceReply === true}
+              onChange={(e) => setApprovalTopicConfig(threadId, {
+                ...config,
+                approvalActionConfig: {
+                  ...config.approvalActionConfig,
+                  refreshOnSourceReply: e.target.checked,
+                  deleteSourceMessageOnReply: e.target.checked
+                    ? config.approvalActionConfig.deleteSourceMessageOnReply
+                    : false,
+                },
+              })}
+            />
+            <span>Khi có người trả lời bổ sung vào tin cũ, bot tạo lại 1 yêu cầu mới theo tin trả lời đó</span>
+          </label>
+          {config.approvalActionConfig.refreshOnSourceReply === true && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+              <input
+                type="checkbox"
+                checked={config.approvalActionConfig.deleteSourceMessageOnReply === true}
+                onChange={(e) => setApprovalTopicConfig(threadId, {
+                  ...config,
+                  approvalActionConfig: {
+                    ...config.approvalActionConfig,
+                    deleteSourceMessageOnReply: e.target.checked,
+                  },
+                })}
+              />
+              <span>Xóa tin chấm công cũ trong nhóm nguồn sau khi bot đã tạo yêu cầu mới</span>
+            </label>
+          )}
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+            <input
+              type="checkbox"
+              checked={config.approvalActionConfig.attendanceSupplementReplyEnabled === true}
+              onChange={(e) => setApprovalTopicConfig(threadId, {
+                ...config,
+                approvalActionConfig: {
+                  ...config.approvalActionConfig,
+                  attendanceSupplementReplyEnabled: e.target.checked,
+                },
+              })}
+            />
+            <span>Bổ sung chấm công: khi có người trả lời/sửa tin chấm công cũ, xóa thông báo đã chấm công cũ và tạo lại theo nội dung mới (độc lập với tùy chọn bổ sung tin trả lời ở trên)</span>
           </label>
         </div>
       );
@@ -1013,6 +1072,32 @@ export default function ChatDetails({
           {'\n\n'}
           {approvalAgreeResultMessageInput || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage}
         </div>
+      </div>
+      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nếu người gửi trả lời bổ sung vào tin cũ</div>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+          <input
+            type="checkbox"
+            checked={approvalRefreshOnSourceReplyInput}
+            onChange={(e) => {
+              setApprovalRefreshOnSourceReplyInput(e.target.checked);
+              if (!e.target.checked) {
+                setApprovalDeleteSourceMessageOnReplyInput(false);
+              }
+            }}
+          />
+          <span>Nếu có người trả lời thêm vào tin cũ, bot sẽ tạo lại yêu cầu mới dựa trên tin trả lời đó</span>
+        </label>
+        {approvalRefreshOnSourceReplyInput && (
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
+            <input
+              type="checkbox"
+              checked={approvalDeleteSourceMessageOnReplyInput}
+              onChange={(e) => setApprovalDeleteSourceMessageOnReplyInput(e.target.checked)}
+            />
+            <span>Xóa luôn tin cũ ở nhóm nguồn sau khi bot đã tạo yêu cầu mới</span>
+          </label>
+        )}
       </div>
     </div>
   );
@@ -1323,6 +1408,9 @@ export default function ChatDetails({
       agreeResultMessage: approvalAgreeResultMessageInput,
       disagreeResultMessage: approvalDisagreeResultMessageInput,
       hideAfterAction: approvalHideAfterActionInput,
+      refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
+      deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
+      attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
     },
   });
 

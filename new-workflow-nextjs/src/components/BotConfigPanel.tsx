@@ -8,6 +8,8 @@ interface BotConfigPanelProps {
   onSaveSuccess?: () => void;
 }
 
+const DEFAULT_DIVIDER_TEXT = '💠 ─────────────────────── 💠';
+
 export default function BotConfigPanel({
   isOpen,
   onClose,
@@ -18,10 +20,10 @@ export default function BotConfigPanel({
   const [savedTokenLabel, setSavedTokenLabel] = useState('');
   const [tokenStatus, setTokenStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [tokenBotName, setTokenBotName] = useState('');
+  const [dividerTextInput, setDividerTextInput] = useState(DEFAULT_DIVIDER_TEXT);
   const [isSavingToken, setIsSavingToken] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
 
-  // Load current global token on open
   useEffect(() => {
     if (!isOpen) return;
 
@@ -36,6 +38,7 @@ export default function BotConfigPanel({
 
         setHasSavedToken(!!data.hasToken);
         setSavedTokenLabel(data.token || '');
+        setDividerTextInput(typeof data.dividerText === 'string' ? data.dividerText : DEFAULT_DIVIDER_TEXT);
         setTokenInput('');
         setTokenStatus('idle');
         setTokenBotName('');
@@ -79,37 +82,39 @@ export default function BotConfigPanel({
     }
   };
 
-  const handleSaveToken = async () => {
+  const handleSaveConfig = async () => {
     const token = tokenInput.trim();
-    if (!token) {
-      if (hasSavedToken) {
-        showStatus(
-          savedTokenLabel
-            ? `ℹ️ Token bot hiện đã được lưu trong database (${savedTokenLabel}).`
-            : 'ℹ️ Token bot hiện đã được lưu trong database.'
-        );
-        setTimeout(onClose, 1000);
-      }
+    const shouldSaveDividerOnly = !token && hasSavedToken;
+
+    if (!token && !shouldSaveDividerOnly) {
       return;
     }
+
     setIsSavingToken(true);
     try {
+      const payload: { token?: string; dividerText: string } = {
+        dividerText: dividerTextInput,
+      };
+      if (token) {
+        payload.token = token;
+      }
+
       const res = await fetch('/api/bot-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
-        setHasSavedToken(true);
+        setHasSavedToken(!!data.token);
         setSavedTokenLabel(data.token || '');
         setTokenInput('');
         setTokenStatus('idle');
-        showStatus('✅ Đã lưu Bot Token thành công!');
+        showStatus('✅ Đã lưu cấu hình chung thành công!');
         if (onSaveSuccess) onSaveSuccess();
         setTimeout(onClose, 1000);
       } else {
-        showStatus('❌ ' + (data.error || 'Lỗi lưu token'));
+        showStatus('❌ ' + (data.error || 'Lỗi lưu cấu hình'));
       }
     } catch {
       showStatus('❌ Lỗi kết nối server');
@@ -126,62 +131,81 @@ export default function BotConfigPanel({
   if (!isOpen) return null;
 
   return (
-    <div className="bot-panel-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.4)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}>
-      <div className="bot-panel" style={{
-        background: 'var(--bg-primary)',
-        width: 'min(440px, calc(100vw - 24px))',
-        maxHeight: 'calc(100dvh - 24px)',
-      }}>
-        {/* Panel Header */}
-        <div className="bot-panel-header" style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '14px 16px',
-          borderBottom: '1px solid var(--border-color)',
-        }}>
+    <div
+      className="bot-panel-overlay"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        className="bot-panel"
+        style={{
+          background: 'var(--bg-primary)',
+          width: 'min(480px, calc(100vw - 24px))',
+          maxHeight: 'calc(100dvh - 24px)',
+        }}
+      >
+        <div
+          className="bot-panel-header"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '14px 16px',
+            borderBottom: '1px solid var(--border-color)',
+          }}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <span style={{ fontSize: '18px' }}>🤖</span>
             <div>
               <h2 style={{ fontSize: '14px', margin: 0, fontWeight: '700' }}>Cấu hình Telegram Bot</h2>
-              <p style={{ fontSize: '10px', margin: 0, color: 'var(--color-text-muted)' }}>Cài đặt token bot toàn cục cho hệ thống</p>
+              <p style={{ fontSize: '10px', margin: 0, color: 'var(--color-text-muted)' }}>
+                Cài đặt token bot và đường line dùng chung cho toàn hệ thống
+              </p>
             </div>
           </div>
-          <button onClick={onClose} style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--color-text-muted)',
-            cursor: 'pointer',
-            fontSize: '16px',
-          }}><i className="fa-solid fa-xmark" /></button>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-text-muted)',
+              cursor: 'pointer',
+              fontSize: '16px',
+            }}
+          >
+            <i className="fa-solid fa-xmark" />
+          </button>
         </div>
 
-        {/* Panel Body */}
         <div className="bot-panel-body" style={{ paddingTop: '14px' }}>
           {statusMessage && (
-            <div style={{
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border-color)',
-              padding: '7px 8px',
-              borderRadius: '4px',
-              fontSize: '11px',
-              textAlign: 'center',
-            }}>{statusMessage}</div>
+            <div
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                padding: '7px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                textAlign: 'center',
+              }}
+            >
+              {statusMessage}
+            </div>
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', fontWeight: '600' }}>Token Bot từ @BotFather:</label>
+            <label style={{ fontSize: '11px', fontWeight: '600' }}>Token Bot từ `@BotFather`:</label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="password"
@@ -217,19 +241,53 @@ export default function BotConfigPanel({
               </button>
             </div>
             {hasSavedToken && !tokenInput.trim() && (
-              <div style={{
-                fontSize: '10px',
-                color: 'var(--color-text-muted)',
-                lineHeight: 1.4,
-              }}>
+              <div
+                style={{
+                  fontSize: '10px',
+                  color: 'var(--color-text-muted)',
+                  lineHeight: 1.4,
+                }}
+              >
                 Token hiện tại đã được lưu trong database{savedTokenLabel ? ` (${savedTokenLabel})` : ''}. Nhập token mới nếu muốn thay đổi.
               </div>
             )}
           </div>
 
           <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.35 }}>
-            * Thay đổi ở đây sẽ cập nhật Token Bot toàn cục dùng cho tất cả Automation.
+            * Thay đổi ở đây sẽ cập nhật Token Bot toàn cục dùng cho tất cả automation.
           </span>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px',
+              paddingTop: '10px',
+              marginTop: '6px',
+              borderTop: '1px solid var(--border-color)',
+            }}
+          >
+            <label style={{ fontSize: '11px', fontWeight: '600' }}>Đường line dùng chung:</label>
+            <textarea
+              value={dividerTextInput}
+              onChange={(e) => setDividerTextInput(e.target.value)}
+              rows={3}
+              placeholder="Ví dụ: 💠 ─────────────────────── 💠"
+              style={{
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                padding: '8px 10px',
+                color: 'var(--color-text)',
+                fontSize: '12px',
+                resize: 'vertical',
+                lineHeight: 1.4,
+              }}
+            />
+            <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+              Bot sẽ gửi dòng này thành một tin nhắn riêng trước các tin nhắn mở đầu. Để trống nếu muốn bỏ line.
+            </span>
+          </div>
 
           {tokenStatus === 'ok' && (
             <div style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -242,12 +300,22 @@ export default function BotConfigPanel({
             </div>
           )}
 
-          {/* Action buttons */}
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '2px' }}>
-            <button className="btn btn-secondary" onClick={onClose} style={{ fontSize: '11px', padding: '6px 12px', borderRadius: '4px' }}>Đóng</button>
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              justifyContent: 'flex-end',
+              borderTop: '1px solid var(--border-color)',
+              paddingTop: '10px',
+              marginTop: '2px',
+            }}
+          >
+            <button className="btn btn-secondary" onClick={onClose} style={{ fontSize: '11px', padding: '6px 12px', borderRadius: '4px' }}>
+              Đóng
+            </button>
             <button
               className="btn btn-primary"
-              onClick={handleSaveToken}
+              onClick={handleSaveConfig}
               disabled={(!tokenInput.trim() && !hasSavedToken) || isSavingToken}
               style={{
                 fontSize: '11px',

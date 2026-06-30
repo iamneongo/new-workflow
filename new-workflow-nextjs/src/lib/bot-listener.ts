@@ -16,6 +16,7 @@ import {
   saveAutomationSetup,
   getActiveAutomationSetups,
   loadGlobalBotToken,
+  loadGlobalSetting,
   loadDatabase,
   getPool,
   normalizeThreadId,
@@ -69,6 +70,9 @@ export interface ActiveListener {
   lastForwardTime: number | null;
 }
 
+const MESSAGE_DIVIDER_SETTING_KEY = 'message_divider_text';
+const DEFAULT_MESSAGE_DIVIDER_TEXT = '💠 ─────────────────────── 💠';
+
 declare global {
   // eslint-disable-next-line no-var
   var __activeListeners: Map<string, ActiveListener> | undefined;
@@ -86,6 +90,8 @@ declare global {
   var __processedUpdateIds: Set<number> | undefined;
   // eslint-disable-next-line no-var
   var __mediaGroupBuffers: Map<string, { timer: NodeJS.Timeout; messages: any[] }> | undefined;
+  // eslint-disable-next-line no-var
+  var __pendingIncompleteNotices: Map<string, { chatId: number; noticeMsgId: number; createdAt: number }> | undefined;
 }
 
 // Initialize active listeners Map if not present
@@ -100,6 +106,9 @@ if (!global.__processedUpdateIds) {
 }
 if (!global.__mediaGroupBuffers) {
   global.__mediaGroupBuffers = new Map();
+}
+if (!global.__pendingIncompleteNotices) {
+  global.__pendingIncompleteNotices = new Map();
 }
 
 function removeLegacyGramjsListenerIfAny(): void {
@@ -441,11 +450,12 @@ async function handleBotUpdate(update: any) {
           if (listenMatch.matched && supplierRoutes.length > 0) {
             await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
 
-            const selectionText = addEmojiDivider(`🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`);
+            const selectionText = `🏭 *CHỌN NHÀ CUNG ỨNG*\n\n${log.original_text || '[Media]'}\n\nHãy chọn nhà cung ứng để tiếp tục gửi yêu cầu.`;
             emitListenerLog('info', `Kênh/topic lắng nghe khớp: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
               automationId: log.automation_id,
               step: 'supplier-select',
             });
+            await sendDividerMessageIfNeeded(baseUrl, cq.message.chat.id, cq.message.message_thread_id || autoSetup.approvalThreadId || undefined, 'supplier selection prompt');
             const selectionData = await sendTelegramMessageWithFallback(baseUrl, {
               chat_id: cq.message.chat.id,
               message_thread_id: cq.message.message_thread_id || autoSetup.approvalThreadId || undefined,
@@ -508,12 +518,13 @@ async function handleBotUpdate(update: any) {
               step: 'approval',
             });
           }
-          const rejectText = formatRejectCustomMessage(
+          const rejectText = formatRejectCustomMessagePlain(
             rejectTopicConfig.rejectCustomMessage,
             userFullName,
             log.original_sender_name || '',
             log.original_text || ''
           );
+          await sendDividerMessageIfNeeded(baseUrl, rejectTarget.groupId, rejectTarget.threadId || undefined, 'reject notice');
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: rejectTarget.groupId,
             message_thread_id: rejectTarget.threadId || undefined,
@@ -559,7 +570,8 @@ async function handleBotUpdate(update: any) {
           }
 
           void (async () => {
-          const supplyText = addEmojiDivider(`💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
+          const supplyText = `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`;
+          await sendDividerMessageIfNeeded(baseUrl, selectedRoute.groupId, selectedRoute.threadId || undefined, `supplier route ${selectedRoute.name}`);
           const promptPromise = sendTelegramMessageWithFallback(baseUrl, {
             chat_id: selectedRoute.groupId,
             message_thread_id: selectedRoute.threadId || undefined,
@@ -716,7 +728,8 @@ async function handleBotUpdate(update: any) {
           await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
           return;
         }
-        const deliveryText = addEmojiDivider(`📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`);
+        const deliveryText = `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nVật tư đang được vận chuyển đến công trình.`;
+        await sendDividerMessageIfNeeded(baseUrl, autoSetup.deliveryGroupId, autoSetup.deliveryThreadId || undefined, 'delivery notice');
         const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: autoSetup.deliveryGroupId,
           message_thread_id: autoSetup.deliveryThreadId || undefined,
@@ -789,8 +802,9 @@ async function handleBotUpdate(update: any) {
           });
         }
         const rejectText = isChange
-          ? addEmojiDivider(`🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`)
-          : addEmojiDivider(`❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`);
+          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`
+          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`;
+        await sendDividerMessageIfNeeded(baseUrl, isChange ? cq.message.chat.id : rejectTarget.groupId, isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined), 'reject/change notice');
         const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
           chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
           message_thread_id: isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined),
@@ -808,8 +822,93 @@ async function handleBotUpdate(update: any) {
 
     let replyHandled = false;
 
+    // Helper: re-process a source message (either an explicit reply to it, or the
+    // message itself after being edited in place) by superseding the previous
+    // workflow log/approval prompt and regenerating it from the new content.
+    const tryApplySourceReplyRefresh = async (
+      msg: any,
+      sourceMsgId: number,
+      options: { isEdit: boolean }
+    ): Promise<boolean> => {
+      const chatId = msg.chat.id.toString();
+      const replyThreadId = normalizeThreadId(msg.message_thread_id);
+      const sourceReplyLogRes = await p.query(
+        'SELECT * FROM workflow_logs WHERE original_msg_id = $1 ORDER BY id DESC',
+        [sourceMsgId]
+      );
+      if (sourceReplyLogRes.rows.length === 0) return false;
+
+      for (const log of sourceReplyLogRes.rows) {
+        const autoSetup = await loadAutomationSetup(log.automation_id);
+        if (!autoSetup) continue;
+
+        const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
+        const refreshEnabled = approvalTopicConfig.approvalActionConfig.refreshOnSourceReply === true
+          || approvalTopicConfig.approvalActionConfig.attendanceSupplementReplyEnabled === true;
+        if (!refreshEnabled) {
+          continue;
+        }
+
+        const replyRefreshScope = matchesSourceReplyRefreshScope(chatId, replyThreadId, autoSetup, log);
+        if (!replyRefreshScope.matched) {
+          continue;
+        }
+
+        const newText = msg.text || msg.caption || '[Hình ảnh/Tài liệu]';
+        const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
+        const refreshedOriginalText = options.isEdit
+          ? newText
+          : formatSourceReplyRefreshText(log.original_text || '', newText, senderFullName);
+
+        await p.query("UPDATE workflow_logs SET status = 'superseded' WHERE id = $1", [log.id]);
+
+        if (log.approval_msg_id && autoSetup.approvalGroupId) {
+          await deleteTelegramMessage(baseUrl, {
+            chat_id: autoSetup.approvalGroupId,
+            message_id: log.approval_msg_id,
+          }, 'superseded approval prompt');
+        }
+
+        if (!options.isEdit && approvalTopicConfig.approvalActionConfig.deleteSourceMessageOnReply === true) {
+          await deleteTelegramMessage(baseUrl, {
+            chat_id: msg.chat.id,
+            message_id: sourceMsgId,
+          }, 'superseded source message');
+        }
+
+        await sendTelegramMessageWithFallback(baseUrl, {
+          chat_id: msg.chat.id,
+          message_thread_id: msg.message_thread_id || undefined,
+          reply_to_message_id: msg.message_id,
+          text: options.isEdit
+            ? '✅ Bot đã ghi nhận tin nhắn đã sửa và tạo lại báo cáo theo nội dung mới.'
+            : '✅ Bot đã nhận phần bổ sung và tạo lại yêu cầu mới theo tin trả lời này.',
+        }, options.isEdit ? 'source edit refresh ack' : 'source reply refresh ack');
+
+        await handleBotMessageTrigger(msg, p, token, undefined, {
+          forceProcess: true,
+          overrideOriginalText: refreshedOriginalText,
+        });
+        return true;
+      }
+      return false;
+    };
+
+    if (update.message && update.message.reply_to_message && !replyHandled) {
+      const msg = update.message;
+      const replyToMsgId = msg.reply_to_message.message_id;
+      replyHandled = await tryApplySourceReplyRefresh(msg, replyToMsgId, { isEdit: false });
+    }
+
+    // Edited source message: treat as if the user replied to their own original
+    // message with the corrected content (xử lý tin nhắn sửa như reply tin sửa).
+    if (update.edited_message && !replyHandled) {
+      const editedMsg = update.edited_message;
+      replyHandled = await tryApplySourceReplyRefresh(editedMsg, editedMsg.message_id, { isEdit: true });
+    }
+
     // 3. Reply to delivery message handler
-    if (update.message && update.message.reply_to_message) {
+    if (update.message && update.message.reply_to_message && !replyHandled) {
       const msg = update.message;
       const replyToMsgId = msg.reply_to_message.message_id;
       const chatId = msg.chat.id.toString();
@@ -873,7 +972,8 @@ async function handleBotUpdate(update: any) {
             text: '✅ Bot đã nhận phản hồi nghiệm thu và đang chuyển đến nhóm tổng hợp.',
           }, 'delivery reply ack');
 
-          const finalHeader = addEmojiDivider(`✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
+          const finalHeader = `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`;
+          await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
           await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: autoSetup.finalGroupId,
             message_thread_id: autoSetup.finalThreadId || undefined,
@@ -931,11 +1031,12 @@ async function handleBotUpdate(update: any) {
             ? log.original_sender_name.trim()
             : 'Kh\u00f4ng r\u00f5';
           const originalRequestText = log.original_text || '[Media]';
-          const enrichedRelayHeader = addEmojiDivider(`🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Yêu cầu ban đầu từ:* ${originalSenderName}\n*Nội dung yêu cầu ban đầu:* ${originalRequestText}\n\n*Người đang phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới là tin reply gốc được bot chuyển tiếp lại.`);
+          const enrichedRelayHeader = `🔄 *NHÀ CUNG ỨNG YÊU CẦU THAY ĐỔI VẬT TƯ*\n\n*Yêu cầu ban đầu từ:* ${originalSenderName}\n*Nội dung yêu cầu ban đầu:* ${originalRequestText}\n\n*Người đang phản hồi:* ${senderFullName}\n*Nội dung phản hồi:* ${replyText || '[Media]'}\n\nNội dung chi tiết bên dưới là tin reply gốc được bot chuyển tiếp lại.`;
           const relayMode: 'copyMessage' | 'forwardMessage' = autoSetup.supplyChangeMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const relayThreadId = autoSetup.supplyChangeThreadId || autoSetup.supplyThreadId || undefined;
           replyHandled = true;
 
+          await sendDividerMessageIfNeeded(baseUrl, targetGroupId, relayThreadId, 'supply change relay header');
           const relayData = await sendTelegramMessageWithFallback(baseUrl, {
             chat_id: targetGroupId,
             message_thread_id: relayThreadId,
@@ -1048,7 +1149,11 @@ async function handleBotMessageTrigger(
   msg: any,
   p: ReturnType<typeof getPool>,
   botToken: string,
-  mediaGroupMsgIds?: number[]
+  mediaGroupMsgIds?: number[],
+  options?: {
+    forceProcess?: boolean;
+    overrideOriginalText?: string;
+  }
 ): Promise<void> {
   const rawChatId = msg?.chat?.id?.toString?.() ?? '';
   if (!rawChatId) return;
@@ -1117,15 +1222,50 @@ async function handleBotMessageTrigger(
     }
 
     const sourceRecognition = resolveSourceMessageRecognitionConfig(listener);
-    if (sourceRecognition.enabled) {
+    const noticeBaseUrl = `https://api.telegram.org/bot${botToken || global.__globalBotToken}`;
+    const incompleteNoticeKey = `${listener.automationId}:${chatId}:${threadId ?? 'root'}:${sender?.id ?? 'unknown'}`;
+    if (!options?.forceProcess && sourceRecognition.enabled) {
       const matchResult = matchesSourceMessageRecognition(messageText, sourceRecognition);
       if (!matchResult.matched) {
         emitListenerLog('warn', `Bỏ qua tin nhắn vì không khớp dấu hiệu nhận dạng. Thiếu: ${matchResult.missingKeywords.join(', ')}`, {
           automationId: listener.automationId,
           step: 'message-filter',
         });
+
+        // Chấm thiếu: bot báo thiếu thông tin và chờ tin nhắn bổ sung từ cùng người gửi.
+        const prevNotice = global.__pendingIncompleteNotices!.get(incompleteNoticeKey);
+        if (prevNotice) {
+          await deleteTelegramMessage(noticeBaseUrl, {
+            chat_id: prevNotice.chatId,
+            message_id: prevNotice.noticeMsgId,
+          }, 'stale incomplete attendance notice');
+          global.__pendingIncompleteNotices!.delete(incompleteNoticeKey);
+        }
+        const noticeData = await sendTelegramMessageWithFallback(noticeBaseUrl, {
+          chat_id: msg.chat.id,
+          message_thread_id: msg.message_thread_id || undefined,
+          reply_to_message_id: msg.message_id,
+          text: `⚠️ Tin nhắn chấm công thiếu thông tin: ${matchResult.missingKeywords.join(', ')}. Vui lòng gửi tin nhắn bổ sung đầy đủ.`,
+        }, 'incomplete attendance notice');
+        if (noticeData.ok) {
+          global.__pendingIncompleteNotices!.set(incompleteNoticeKey, {
+            chatId: msg.chat.id,
+            noticeMsgId: noticeData.result.message_id,
+            createdAt: Date.now(),
+          });
+        }
         continue;
       }
+    }
+
+    // Tin nhắn bổ sung đã đủ thông tin: xóa thông báo "chấm thiếu" cũ đã gửi.
+    const resolvedNotice = global.__pendingIncompleteNotices!.get(incompleteNoticeKey);
+    if (resolvedNotice) {
+      global.__pendingIncompleteNotices!.delete(incompleteNoticeKey);
+      await deleteTelegramMessage(noticeBaseUrl, {
+        chat_id: resolvedNotice.chatId,
+        message_id: resolvedNotice.noticeMsgId,
+      }, 'resolved incomplete attendance notice');
     }
 
     console.log(`[BotListener] Received trigger msg from chat ${chatId} (Thread: ${threadId})`);
@@ -1148,7 +1288,7 @@ async function handleBotMessageTrigger(
     const activeBaseUrl = `https://api.telegram.org/bot${currentBotToken}`;
     emitListenerLog('info', 'Bot token sẵn sàng.', { automationId: listener.automationId, step: 'token' });
 
-    const originalText = messageText;
+    const originalText = options?.overrideOriginalText ?? messageText;
     const originalThreadId = normalizeThreadId(msg?.message_thread_id);
 
     // Dedup check: ensure same message_id is not processed twice for the same automation
@@ -1174,7 +1314,7 @@ async function handleBotMessageTrigger(
 
       const logRes = await p.query(
         `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
          ON CONFLICT (automation_id, original_msg_id) DO NOTHING
          RETURNING id`,
         [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText]
@@ -1243,10 +1383,11 @@ async function handleBotMessageTrigger(
       automationId: listener.automationId,
       step: 'approval',
     });
+    await sendDividerMessageIfNeeded(activeBaseUrl, listener.approvalGroupId, listener.approvalThreadId || undefined, 'approval prompt');
     const apprData = await sendTelegramMessageWithFallback(activeBaseUrl, {
       chat_id: listener.approvalGroupId,
       message_thread_id: listener.approvalThreadId || undefined,
-      text: formatApprovalCustomMessage(
+      text: formatApprovalCustomMessagePlain(
         approvalTopicConfig.approvalCustomMessage,
         senderName,
         originalText
@@ -1480,7 +1621,7 @@ async function resolveBotApiChatId(chatId: string): Promise<string> {
 }
 
 function addEmojiDivider(text: string): string {
-  return `💠 ─────────────────────── 💠\n\n${text}`;
+  return text;
 }
 
 function formatApprovalCustomMessage(
@@ -1521,10 +1662,63 @@ function formatRejectCustomMessage(
     .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]'));
 }
 
+async function loadMessageDividerText(): Promise<string> {
+  const saved = await loadGlobalSetting(MESSAGE_DIVIDER_SETTING_KEY);
+  if (typeof saved === 'string') {
+    return saved.trim();
+  }
+  return DEFAULT_MESSAGE_DIVIDER_TEXT;
+}
+
+async function sendDividerMessageIfNeeded(
+  baseUrl: string,
+  chatId: string | number,
+  threadId: number | null | undefined,
+  label: string
+): Promise<void> {
+  const dividerText = await loadMessageDividerText();
+  if (!dividerText.trim()) {
+    return;
+  }
+
+  await sendTelegramMessageWithFallback(baseUrl, {
+    chat_id: chatId,
+    message_thread_id: threadId || undefined,
+    text: dividerText,
+  }, `${label} divider`);
+}
+
+function formatApprovalCustomMessagePlain(
+  template: string,
+  senderName: string,
+  originalText: string
+): string {
+  const base = (template || DEFAULT_APPROVAL_CUSTOM_MESSAGE).trim() || DEFAULT_APPROVAL_CUSTOM_MESSAGE;
+  return base
+    .replaceAll('{{senderName}}', senderName)
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
+function formatRejectCustomMessagePlain(
+  template: string,
+  userFullName: string,
+  senderName: string,
+  originalText: string
+): string {
+  const base = (template || DEFAULT_REJECT_CUSTOM_MESSAGE).trim() || DEFAULT_REJECT_CUSTOM_MESSAGE;
+  return base
+    .replaceAll('{{userFullName}}', userFullName)
+    .replaceAll('{{senderName}}', senderName || 'Không rõ')
+    .replaceAll('{{originalText}}', originalText || '[Hình ảnh/Tài liệu]');
+}
+
 function resolveApprovalActionConfig(autoSetup: any) {
   const cfg = autoSetup?.approvalActionConfig || {};
   return {
     hideAfterAction: cfg.hideAfterAction === true,
+    refreshOnSourceReply: cfg.refreshOnSourceReply === true,
+    deleteSourceMessageOnReply: cfg.deleteSourceMessageOnReply === true,
+    attendanceSupplementReplyEnabled: cfg.attendanceSupplementReplyEnabled === true,
     agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
       ? cfg.agreeButtonLabel.trim()
       : DEFAULT_APPROVAL_ACTION_CONFIG.agreeButtonLabel,
@@ -1633,6 +1827,56 @@ function matchesSourceMessageRecognition(
 function normalizeComparableChatId(chatId: string | number | null | undefined): string {
   if (chatId === null || chatId === undefined) return '';
   return String(chatId).replace(/^-100/, '').replace(/^-/, '');
+}
+
+function matchesSourceReplyRefreshScope(
+  actualChatId: string,
+  actualThreadId: number | null,
+  autoSetup: any,
+  log: any
+): { matched: boolean; reason: string } {
+  const expectedGroupId = normalizeComparableChatId(log.original_chat_id || autoSetup.sourceGroupId);
+  const expectedThreadId = normalizeThreadId(log.original_thread_id);
+  const normalizedActualChatId = normalizeComparableChatId(actualChatId);
+
+  if (!expectedGroupId || normalizedActualChatId !== expectedGroupId) {
+    return {
+      matched: false,
+      reason: `reply chat=${normalizedActualChatId || 'unknown'} không khớp group nguồn ${expectedGroupId || 'unknown'}`,
+    };
+  }
+
+  if (expectedThreadId === null) {
+    if (actualThreadId !== null) {
+      return {
+        matched: false,
+        reason: `reply topic=${actualThreadId} không khớp General`,
+      };
+    }
+    return { matched: true, reason: 'Khớp group nguồn / General' };
+  }
+
+  if (actualThreadId !== expectedThreadId) {
+    return {
+      matched: false,
+      reason: `reply topic=${actualThreadId ?? 'general'} không khớp topic nguồn ${expectedThreadId}`,
+    };
+  }
+
+  return {
+    matched: true,
+    reason: `Khớp group ${expectedGroupId} / topic ${expectedThreadId}`,
+  };
+}
+
+function formatSourceReplyRefreshText(
+  originalText: string,
+  replyText: string,
+  senderFullName: string
+): string {
+  const originalBlock = originalText?.trim() ? originalText.trim() : '[Không có nội dung cũ]';
+  const replyBlock = replyText?.trim() ? replyText.trim() : '[Hình ảnh/Tài liệu]';
+  return `Yêu cầu cũ:\n${originalBlock}\n\nCập nhật mới từ ${senderFullName}:\n${replyBlock}`;
 }
 
 function resolveSupplyListenScope(autoSetup: any): { groupId: string; threadIds: number[] } {

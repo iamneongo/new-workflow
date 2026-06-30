@@ -14,6 +14,9 @@ export interface ApprovalActionConfig {
   agreeResultMessage: string;
   disagreeResultMessage: string;
   hideAfterAction: boolean;
+  refreshOnSourceReply: boolean;
+  deleteSourceMessageOnReply: boolean;
+  attendanceSupplementReplyEnabled: boolean;
 }
 
 export interface ApprovalTopicConfig {
@@ -49,6 +52,9 @@ export const DEFAULT_REJECT_CUSTOM_MESSAGE =
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
   hideAfterAction: false,
+  refreshOnSourceReply: false,
+  deleteSourceMessageOnReply: false,
+  attendanceSupplementReplyEnabled: false,
   agreeButtonLabel: '👍 Đồng ý',
   disagreeButtonLabel: '👎 Không đồng ý',
   agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',

@@ -100,6 +100,8 @@ export interface ApprovalActionConfig {
   agreeResultMessage: string;
   disagreeResultMessage: string;
   hideAfterAction: boolean;
+  refreshOnSourceReply: boolean;
+  deleteSourceMessageOnReply: boolean;
 }
 
 export interface ApprovalTopicConfig {
@@ -134,6 +136,8 @@ export function normalizeApprovalMessageMode(value: unknown): ApprovalMessageMod
 export function normalizeApprovalActionConfig(value: unknown): ApprovalActionConfig {
   const fallback: ApprovalActionConfig = {
     hideAfterAction: false,
+    refreshOnSourceReply: false,
+    deleteSourceMessageOnReply: false,
     agreeButtonLabel: '👍 Đồng ý',
     disagreeButtonLabel: '👎 Không đồng ý',
     agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -147,6 +151,8 @@ export function normalizeApprovalActionConfig(value: unknown): ApprovalActionCon
   const cfg = value as Partial<ApprovalActionConfig>;
   return {
     hideAfterAction: cfg.hideAfterAction === true,
+    refreshOnSourceReply: cfg.refreshOnSourceReply === true,
+    deleteSourceMessageOnReply: cfg.deleteSourceMessageOnReply === true,
     agreeButtonLabel: typeof cfg.agreeButtonLabel === 'string' && cfg.agreeButtonLabel.trim()
       ? cfg.agreeButtonLabel.trim()
       : fallback.agreeButtonLabel,
@@ -209,6 +215,8 @@ export const DEFAULT_REJECT_CUSTOM_MESSAGE =
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
   hideAfterAction: false,
+  refreshOnSourceReply: false,
+  deleteSourceMessageOnReply: false,
   agreeButtonLabel: '👍 Đồng ý',
   disagreeButtonLabel: '👎 Không đồng ý',
   agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -586,6 +594,8 @@ export async function ensureDatabase(): Promise<void> {
       WHERE approval_action_config IS NULL
     `, [JSON.stringify({
       hideAfterAction: false,
+      refreshOnSourceReply: false,
+      deleteSourceMessageOnReply: false,
       agreeButtonLabel: '👍 Đồng ý',
       disagreeButtonLabel: '👎 Không đồng ý',
       agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -911,6 +921,8 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   approvalActionConfig: {
     hideAfterAction: false,
+    refreshOnSourceReply: false,
+    deleteSourceMessageOnReply: false,
     agreeButtonLabel: '👍 Đồng ý',
     disagreeButtonLabel: '👎 Không đồng ý',
     agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
