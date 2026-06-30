@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "deploy:vps": "python scripts/deploy_vps.py"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
