@@ -664,6 +664,12 @@ export async function ensureDatabase(): Promise<void> {
       await client.query(q);
     }
 
+    // Add unique index to prevent duplicate workflow logs for same message + automation
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_logs_automation_msg
+      ON workflow_logs (automation_id, original_msg_id)
+    `);
+
     // Create global_settings table
     await client.query(`
       CREATE TABLE IF NOT EXISTS global_settings (

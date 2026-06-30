@@ -82,6 +82,8 @@ declare global {
   var __botPollingOffset: number | undefined;
   // eslint-disable-next-line no-var
   var __processingCallbackActions: Set<string> | undefined;
+  // eslint-disable-next-line no-var
+  var __processedUpdateIds: Set<number> | undefined;
 }
 
 // Initialize active listeners Map if not present
@@ -90,6 +92,9 @@ if (!global.__activeListeners) {
 }
 if (!global.__processingCallbackActions) {
   global.__processingCallbackActions = new Set();
+}
+if (!global.__processedUpdateIds) {
+  global.__processedUpdateIds = new Set();
 }
 
 function removeLegacyGramjsListenerIfAny(): void {
@@ -314,6 +319,19 @@ async function pollUpdates() {
 }
 
 async function handleBotUpdate(update: any) {
+  // Dedup: skip if this update_id has already been processed (prevents polling retry duplicates)
+  const updateId: number = update.update_id;
+  if (global.__processedUpdateIds!.has(updateId)) {
+    console.log(`[BotListener] Skipping already-processed update_id ${updateId}.`);
+    return;
+  }
+  global.__processedUpdateIds!.add(updateId);
+  // Cleanup old entries to prevent memory leak (keep last 500)
+  if (global.__processedUpdateIds!.size > 1000) {
+    const entries = Array.from(global.__processedUpdateIds!);
+    global.__processedUpdateIds = new Set(entries.slice(-500));
+  }
+
   let callbackFailureReporter: ((bodyText: string, label: string) => Promise<void>) | null = null;
   try {
     const p = getPool();
@@ -1085,14 +1103,50 @@ async function handleBotMessageTrigger(
 
     const originalText = messageText;
     const originalThreadId = normalizeThreadId(msg?.message_thread_id);
+
+    // Dedup check: ensure same message_id is not processed twice for the same automation
+    const existingLog = await p.query(
+      'SELECT id FROM workflow_logs WHERE automation_id = $1 AND original_msg_id = $2 LIMIT 1',
+      [listener.automationId, sourceMessageId]
+    );
+    if (existingLog.rows.length > 0) {
+      emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} vì đã được xử lý trước đó (workflow log #${existingLog.rows[0].id}).`, {
+        automationId: listener.automationId,
+        step: 'dedup',
+      });
+      continue;
+    }
+
     console.log(`[BotListener] Trigger stage: writing workflow log for ${listener.automationId}`);
     emitListenerLog('info', 'Đang ghi workflow log...', { automationId: listener.automationId, step: 'db' });
-    const logRes = await p.query(
-      `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_text, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id`,
-      [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, originalText]
-    );
-    const logId = logRes.rows[0].id;
+    let logId: number;
+    try {
+      const logRes = await p.query(
+        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_text, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')
+         ON CONFLICT (automation_id, original_msg_id) DO NOTHING
+         RETURNING id`,
+        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, originalText]
+      );
+      if (logRes.rows.length === 0) {
+        emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (ON CONFLICT).`, {
+          automationId: listener.automationId,
+          step: 'dedup',
+        });
+        continue;
+      }
+      logId = logRes.rows[0].id;
+    } catch (insertErr: any) {
+      // Fallback: unique constraint violation (race condition)
+      if (insertErr.code === '23505') {
+        emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (unique constraint).`, {
+          automationId: listener.automationId,
+          step: 'dedup',
+        });
+        continue;
+      }
+      throw insertErr;
+    }
     emitListenerLog('info', `Đã tạo workflow log #${logId}.`, { automationId: listener.automationId, step: 'db' });
 
     let senderName = 'Unknown';
