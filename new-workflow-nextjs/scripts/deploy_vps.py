@@ -128,6 +128,8 @@ def main() -> None:
         remote.run(f"systemctl restart {service}")
         remote.run(f"sleep 3 && systemctl is-active {service}")
         remote.run(f"curl -sf -o /dev/null -w 'health check: %{{http_code}}\\n' http://127.0.0.1:{app_port}/")
+        # Trigger ensureDatabase() (lazy DB schema migration) so new columns/tables exist immediately.
+        remote.run(f"curl -sf -o /dev/null -w 'db migration trigger: %{{http_code}}\\n' http://127.0.0.1:{app_port}/api/automations")
 
         remote.run(f"rm -f '{remote_tar}'")
         remote.run(
