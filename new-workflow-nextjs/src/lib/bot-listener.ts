@@ -585,14 +585,19 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
             : [Number(log.original_msg_id)];
 
+          // supplyText already embeds "Nội dung: {originalText}", so only
+          // relay the raw source message separately when it actually carries
+          // media the text prompt can't show.
           const sendMethod: 'forwardMessage' | 'copyMessage' = selectedRoute.messageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-          const contentPromise = sendTelegramMethodWithFallback(baseUrl, sendMethod, {
-            chat_id: selectedRoute.groupId,
-            message_thread_id: selectedRoute.threadId || undefined,
-            from_chat_id: log.original_chat_id,
-            message_id: log.original_msg_id,
-            message_ids: originalMsgIds,
-          }, `supplier route content ${selectedRoute.name}`);
+          const contentPromise = log.original_has_media
+            ? sendTelegramMethodWithFallback(baseUrl, sendMethod, {
+                chat_id: selectedRoute.groupId,
+                message_thread_id: selectedRoute.threadId || undefined,
+                from_chat_id: log.original_chat_id,
+                message_id: log.original_msg_id,
+                message_ids: originalMsgIds,
+              }, `supplier route content ${selectedRoute.name}`)
+            : Promise.resolve({ ok: true } as { ok: boolean; result?: any; description?: string });
 
           const [promptData, contentData] = await Promise.all([promptPromise, contentPromise]);
 
@@ -1209,6 +1214,10 @@ async function handleBotMessageTrigger(
     return;
   }
 
+  const hasNonTextMedia = Boolean(
+    mediaGroupMsgIds?.length || msg?.photo || msg?.document || msg?.video || msg?.voice || msg?.audio || msg?.animation
+  );
+
   const messageText = msg.text || msg.caption || '';
   const sourceMessageId = Number(msg?.message_id ?? msg?.id);
   if (!Number.isInteger(sourceMessageId) || sourceMessageId <= 0) {
@@ -1339,11 +1348,11 @@ async function handleBotMessageTrigger(
         : sourceMessageId.toString();
 
       const logRes = await p.query(
-        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status, thread_root_msg_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+        `INSERT INTO workflow_logs (automation_id, original_chat_id, original_thread_id, original_msg_id, original_msg_ids, original_text, status, thread_root_msg_id, original_has_media)
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
          ON CONFLICT (automation_id, original_msg_id) DO NOTHING
          RETURNING id`,
-        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText, options?.threadRootMsgId ?? sourceMessageId]
+        [listener.automationId, listener.sourceGroupId, originalThreadId, sourceMessageId, msgIdsStr, originalText, options?.threadRootMsgId ?? sourceMessageId, hasNonTextMedia]
       );
       if (logRes.rows.length === 0) {
         emitListenerLog('warn', `Bỏ qua tin nhắn #${sourceMessageId} do trùng lặp (ON CONFLICT).`, {
@@ -1446,9 +1455,6 @@ async function handleBotMessageTrigger(
     // log.original_text into the status card, so a second copy right below
     // it is pure duplication. Only text-less requests (photos, documents...)
     // still need the separate relay since the card can't show media.
-    const hasNonTextMedia = Boolean(
-      mediaGroupMsgIds?.length || msg?.photo || msg?.document || msg?.video || msg?.voice || msg?.audio || msg?.animation
-    );
     if (!hasNonTextMedia) {
       listener.forwardCount += 1;
       listener.lastForwardTime = Date.now();
