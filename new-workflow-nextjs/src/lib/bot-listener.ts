@@ -692,36 +692,11 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }),
         });
 
-        // Send message to delivery group
-        if (!autoSetup.deliveryGroupId) {
-          console.warn(`[BotListener] Delivery group is not configured for automation: ${log.automation_id}. Cannot send delivery notification.`);
-          await updateCallbackStatus('❌ Chưa cấu hình nhóm giao nhận.', 'callback missing delivery group');
-          return;
-        }
-        const deliveryText = withProjectTag(log.original_text, `📦 *THÔNG BÁO GIAO NHẬN VẬT TƯ*\n\nNội dung yêu cầu: ${log.original_text || '[Media]'}\n\nVật tư đang được vận chuyển đến công trình.`);
-        await sendDividerMessageIfNeeded(baseUrl, autoSetup.deliveryGroupId, autoSetup.deliveryThreadId || undefined, 'delivery notice');
-        const deliveryData = await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: autoSetup.deliveryGroupId,
-          message_thread_id: autoSetup.deliveryThreadId || undefined,
-          text: deliveryText,
-        }, 'delivery notice');
-        if (deliveryData.ok) {
-          await p.query(
-            "UPDATE workflow_logs SET delivery_msg_id = $1, delivery_group_id = $2 WHERE id = $3",
-            [deliveryData.result.message_id, normalizeComparableChatId(autoSetup.deliveryGroupId), logId]
-          );
-          emitListenerLog('success', `Đã gửi thông báo giao nhận vật tư #${deliveryData.result.message_id}.`, {
-            automationId: log.automation_id,
-            step: 'delivery',
-          });
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `✅ Đã đồng ý cấp vật tư — ${userFullName}`);
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `📦 Đang giao đến công trình`);
-        } else {
-          emitListenerLog('error', `Không gửi được thông báo giao nhận: ${deliveryData.description || 'unknown error'}`, {
-            automationId: log.automation_id,
-            step: 'delivery',
-          });
-        }
+        // Thẻ trạng thái duy nhất đã ghi nhận đủ "đang giao đến công trình",
+        // không cần gửi thêm tin THÔNG BÁO GIAO NHẬN VẬT TƯ riêng vào nhóm giao
+        // nhận nữa (vốn thường trùng nhóm với nhóm phê duyệt).
+        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `✅ Đã đồng ý cấp vật tư — ${userFullName}`);
+        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `📦 Đang giao đến công trình`);
 
       } else if (action === 'supply_reject' || action === 'supply_change') {
         if (log.status !== 'supply_sent') {
@@ -1455,6 +1430,32 @@ async function handleBotMessageTrigger(
         "UPDATE workflow_logs SET approval_msg_id = $1, approval_divider_msg_id = $2 WHERE id = $3",
         [apprData.result.message_id, approvalDividerMsgId, logId]
       );
+    }
+
+    // Skip forwarding the raw original content into the approval group when
+    // this request is headed into the vật tư (supplier) flow: the single
+    // status card already embeds the full text, and admins repeat-forward it
+    // again per step (supplier, delivery...), so a third copy here is just
+    // clutter. Other flows (e.g. chấm công) still get the forward since their
+    // card header doesn't embed the original text.
+    const willGoToSupplierFlow = matchesSupplyListenScope(listener, { original_chat_id: listener.sourceGroupId, original_thread_id: originalThreadId }).matched
+      && getConfiguredSupplierRoutes(listener).length > 0;
+    if (willGoToSupplierFlow) {
+      listener.forwardCount += 1;
+      listener.lastForwardTime = Date.now();
+      await saveAutomationSetup({
+        id: listener.automationId,
+        forwardCount: listener.forwardCount,
+        lastForwardTime: listener.lastForwardTime,
+      });
+      sendSseUpdate({
+        type: 'messageForwarded',
+        automationId: listener.automationId,
+        count: listener.forwardCount,
+        lastTime: listener.lastForwardTime,
+        preview: originalText.substring(0, 60) || '[Media]',
+      });
+      return;
     }
 
     const contentMethod = approvalTopicConfig.approvalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
