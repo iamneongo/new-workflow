@@ -125,7 +125,7 @@ export interface SupplierRoute {
 }
 
 export const DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG: SourceMessageRecognitionConfig = {
-  enabled: true,
+  enabled: false,
   requiredKeywords: ['CT', 'Buổi', 'HM'],
 };
 
@@ -924,12 +924,12 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   sourceMessageRecognitionConfig: DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG,
   approvalGroupId: '',
   approvalThreadId: null,
-  approvalMessageMode: 'forward',
+  approvalMessageMode: 'copy',
   approvalCustomMessage: DEFAULT_APPROVAL_CUSTOM_MESSAGE,
   approvalActionConfig: {
     hideAfterAction: false,
-    refreshOnSourceReply: false,
-    deleteSourceMessageOnReply: false,
+    refreshOnSourceReply: true,
+    deleteSourceMessageOnReply: true,
     agreeButtonLabel: '👍 Đồng ý',
     disagreeButtonLabel: '👎 Không đồng ý',
     agreeResultMessage: '✅ *ĐÃ PHÊ DUYỆT SƠ BỘ* bởi {{userFullName}}',
@@ -938,8 +938,8 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   approvalTopicConfigs: [],
   supplyGroupId: '',
   supplyThreadId: null,
-  supplierSelectionHideAfterAction: false,
-  supplyPromptHideAfterAction: false,
+  supplierSelectionHideAfterAction: true,
+  supplyPromptHideAfterAction: true,
   supplyListenGroupId: '',
   supplyListenThreadIds: [],
   supplyListenThreadId: null,
@@ -949,7 +949,7 @@ const DEFAULT_AUTOMATION_SETUP = (id: string): AutomationSetup => ({
   supplierRoutes: [],
   deliveryGroupId: '',
   deliveryThreadId: null,
-  finalMessageMode: 'forward',
+  finalMessageMode: 'copy',
   finalGroupId: '',
   finalThreadId: null,
   rejectGroupId: '',

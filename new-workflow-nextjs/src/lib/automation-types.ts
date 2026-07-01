@@ -40,7 +40,7 @@ export interface SupplierRoute {
 }
 
 export const DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG: SourceMessageRecognitionConfig = {
-  enabled: true,
+  enabled: false,
   requiredKeywords: ['CT', 'Buổi', 'HM'],
 };
 
@@ -52,8 +52,8 @@ export const DEFAULT_REJECT_CUSTOM_MESSAGE =
 
 export const DEFAULT_APPROVAL_ACTION_CONFIG: ApprovalActionConfig = {
   hideAfterAction: false,
-  refreshOnSourceReply: false,
-  deleteSourceMessageOnReply: false,
+  refreshOnSourceReply: true,
+  deleteSourceMessageOnReply: true,
   attendanceSupplementReplyEnabled: false,
   agreeButtonLabel: '👍 Đồng ý',
   disagreeButtonLabel: '👎 Không đồng ý',
