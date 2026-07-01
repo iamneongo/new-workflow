@@ -517,6 +517,19 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
           const headerText = buildApprovalHeaderText(autoSetup, log);
 
+          // Delete original source message(s) so other group members can't see it
+          if (log.original_chat_id) {
+            const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+              : [Number(log.original_msg_id)];
+            for (const msgId of originalMsgIds) {
+              await deleteTelegramMessage(baseUrl, {
+                chat_id: log.original_chat_id,
+                message_id: msgId,
+              }, 'rejected source message');
+            }
+          }
+
           // Send reject notification
           const rejectTarget = resolveApprovalRejectTarget(autoSetup);
           if (!rejectTarget.groupId) {
