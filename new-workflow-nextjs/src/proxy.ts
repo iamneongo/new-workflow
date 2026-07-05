@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 const USERNAME = 'admin';
 const PASSWORD = 'wf@2025!';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   // Skip auth for internal API routes called by the bot
   const { pathname } = req.nextUrl;
   if (pathname.startsWith('/api/listener') || pathname.startsWith('/api/stream')) {
