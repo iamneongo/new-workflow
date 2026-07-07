@@ -127,15 +127,9 @@ def main() -> None:
 
         remote.run(f"systemctl restart {service}")
         remote.run(f"sleep 3 && systemctl is-active {service}")
-        remote.run(f"curl -sf -o /dev/null -w 'health check: %{{http_code}}\\n' http://127.0.0.1:{app_port}/")
-        # Login to get session cookie, then trigger ensureDatabase() migration.
-        remote.run(
-            f"COOKIE=$(curl -sf -c - -X POST -H 'Content-Type: application/json' "
-            f"-d '{{\"action\":\"login\",\"username\":\"admin\",\"password\":\"wf@2025!\"}}' "
-            f"http://127.0.0.1:{app_port}/api/auth-web | grep wf_session | awk '{{print $NF}}') && "
-            f"curl -sf -b \"wf_session=$COOKIE\" -o /dev/null -w 'db migration trigger: %{{http_code}}\\n' "
-            f"http://127.0.0.1:{app_port}/api/automations"
-        )
+        remote.run(f"curl -sf -u admin:wf@2025! -o /dev/null -w 'health check: %{{http_code}}\\n' http://127.0.0.1:{app_port}/")
+        # Trigger ensureDatabase() (lazy DB schema migration) so new columns/tables exist immediately.
+        remote.run(f"curl -sf -u admin:wf@2025! -o /dev/null -w 'db migration trigger: %{{http_code}}\\n' http://127.0.0.1:{app_port}/api/automations")
 
         remote.run(f"rm -f '{remote_tar}'")
         remote.run(
