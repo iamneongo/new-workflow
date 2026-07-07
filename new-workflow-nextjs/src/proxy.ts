@@ -1,29 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const USERNAME = 'admin';
-const PASSWORD = 'wf@2025!';
+export const SESSION_COOKIE = 'wf_session';
+export const SESSION_SECRET = 'wf-session-secret-2025';
 
-export function proxy(req: NextRequest) {
-  // Skip auth for internal API routes called by the bot
+const PUBLIC_PATHS = ['/api/auth-web', '/api/listener', '/api/stream'];
+
+function isPublicPath(pathname: string) {
+  return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith('/api/listener') || pathname.startsWith('/api/stream')) {
-    return NextResponse.next();
+
+  // Always pass through public paths and static assets
+  if (isPublicPath(pathname)) return NextResponse.next();
+
+  const sessionCookie = req.cookies.get(SESSION_COOKIE)?.value;
+  const isValid = sessionCookie ? await verifySessionToken(sessionCookie) : false;
+
+  if (isValid) return NextResponse.next();
+
+  // API routes → 401 JSON (client will show login popup)
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'Unauthorized', code: 'SESSION_EXPIRED' }, { status: 401 });
   }
 
-  const authHeader = req.headers.get('authorization');
-  if (authHeader) {
-    const base64 = authHeader.replace('Basic ', '');
-    const decoded = atob(base64);
-    const [user, pass] = decoded.split(':');
-    if (user === USERNAME && pass === PASSWORD) {
-      return NextResponse.next();
-    }
-  }
+  // Page routes → pass through (Dashboard handles showing login popup)
+  return NextResponse.next();
+}
 
-  return new NextResponse('Unauthorized', {
-    status: 401,
-    headers: { 'WWW-Authenticate': 'Basic realm="Workflow"' },
-  });
+async function verifySessionToken(token: string): Promise<boolean> {
+  try {
+    const expected = await computeToken(SESSION_SECRET);
+    return token === expected;
+  } catch {
+    return false;
+  }
+}
+
+export async function computeToken(secret: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode('wf-auth-v1'));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
 }
 
 export const config = {

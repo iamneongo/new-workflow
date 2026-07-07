@@ -6,6 +6,7 @@ import ChatsList from './ChatsList';
 import ChatDetails from './ChatDetails';
 import RenameModal from './RenameModal';
 import AuthModal from './AuthModal';
+import LoginModal from './LoginModal';
 import BotConfigPanel from './BotConfigPanel';
 import AppTour from './AppTour';
 
@@ -77,6 +78,10 @@ export default function Dashboard() {
     isOpen: boolean;
     field: 'phone' | 'code' | 'password' | null;
   }>({ isOpen: false, field: null });
+
+  // Web session state
+  const [isWebLoggedIn, setIsWebLoggedIn] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   const [createAutomationModal, setCreateAutomationModal] = useState<{
     isOpen: boolean;
@@ -166,6 +171,14 @@ export default function Dashboard() {
   }, []);
 
   // 3. Fetch single automation stats when selection changes
+  // Check web session on mount
+  useEffect(() => {
+    fetch('/api/auth-web').then((res) => {
+      setIsWebLoggedIn(res.ok);
+      if (!res.ok) setShowLoginModal(false);
+    }).catch(() => setIsWebLoggedIn(false));
+  }, []);
+
   useEffect(() => {
     if (!selectedAutomationId) return;
 
@@ -457,23 +470,14 @@ export default function Dashboard() {
   };
 
   const handleLogout = async () => {
-    const confirmed = window.confirm('Bạn có chắc chắn muốn đăng xuất Telegram account hiện tại?');
-    if (!confirmed) return;
-
     try {
-      const res = await fetch('/api/auth', {
+      await fetch('/api/auth-web', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'logout' }),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || 'Đăng xuất thất bại');
-        return;
-      }
-
-      window.location.reload();
+      setIsWebLoggedIn(false);
+      setShowLoginModal(false);
     } catch {
       alert('Lỗi kết nối khi đăng xuất');
     }
@@ -594,15 +598,30 @@ export default function Dashboard() {
             {isSyncing ? ' Đang đồng bộ...' : ' Đồng bộ ngay'}
           </button>
 
-          <button
-            className="btn btn-secondary"
-            id="btnLogout"
-            onClick={handleLogout}
-            style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
-          >
-            <i className="fa-solid fa-right-from-bracket" />
-            Đăng xuất
-          </button>
+          {isWebLoggedIn ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <i className="fa-solid fa-circle-user" style={{ color: 'var(--accent-blue)' }} /> admin
+              </span>
+              <button
+                className="btn btn-secondary"
+                id="btnLogout"
+                onClick={handleLogout}
+                style={{ border: '1px solid rgba(239,68,68,0.22)', background: 'rgba(239,68,68,0.08)', color: '#b91c1c' }}
+              >
+                <i className="fa-solid fa-right-from-bracket" />
+                Đăng xuất
+              </button>
+            </div>
+          ) : (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowLoginModal(true)}
+            >
+              <i className="fa-solid fa-right-to-bracket" />
+              Đăng nhập
+            </button>
+          )}
 
           {anyListenerActive && (
             <div className="stat-badge" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', background: 'rgba(16, 185, 129, 0.08)' }}>
@@ -886,6 +905,12 @@ export default function Dashboard() {
         isOpen={authModal.isOpen}
         field={authModal.field}
         onSubmit={handleAuthSubmit}
+      />
+
+      {/* Web Login Modal */}
+      <LoginModal
+        isOpen={showLoginModal}
+        onSuccess={() => { setIsWebLoggedIn(true); setShowLoginModal(false); }}
       />
 
       {/* Global Bot Config Modal */}
