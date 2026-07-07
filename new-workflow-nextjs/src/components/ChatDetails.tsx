@@ -622,6 +622,37 @@ export default function ChatDetails({
     });
   };
 
+  const createDefaultApprovalTopicConfig = (sourceThreadId: number): ApprovalTopicConfig => ({
+    sourceThreadId,
+    approvalMessageMode: approvalMessageModeInput,
+    approvalCustomMessage: approvalCustomMessageInput,
+    approvalActionConfig: {
+      agreeButtonLabel: approvalAgreeButtonLabelInput,
+      disagreeButtonLabel: approvalDisagreeButtonLabelInput,
+      agreeResultMessage: approvalAgreeResultMessageInput,
+      disagreeResultMessage: approvalDisagreeResultMessageInput,
+      hideAfterAction: approvalHideAfterActionInput,
+      refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
+      deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
+      attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
+    },
+  });
+
+  const createDefaultRejectTopicConfig = (sourceThreadId: number): RejectTopicConfig => ({
+    sourceThreadId,
+    rejectCustomMessage: rejectCustomMessageInput,
+  });
+
+  const syncApprovalTopicConfigs = (sourceThreadIds: number[], existing: ApprovalTopicConfig[]) => {
+    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
+    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultApprovalTopicConfig(threadId));
+  };
+
+  const syncRejectTopicConfigs = (sourceThreadIds: number[], existing: RejectTopicConfig[]) => {
+    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
+    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultRejectTopicConfig(threadId));
+  };
+
   const renderApprovalTopicConfigCards = () => {
     if (sourceThreadIdsInput.length === 0) {
       return (
@@ -1397,37 +1428,6 @@ export default function ChatDetails({
     threadId: null,
     messageMode: 'forward',
   });
-
-  const createDefaultApprovalTopicConfig = (sourceThreadId: number): ApprovalTopicConfig => ({
-    sourceThreadId,
-    approvalMessageMode: approvalMessageModeInput,
-    approvalCustomMessage: approvalCustomMessageInput,
-    approvalActionConfig: {
-      agreeButtonLabel: approvalAgreeButtonLabelInput,
-      disagreeButtonLabel: approvalDisagreeButtonLabelInput,
-      agreeResultMessage: approvalAgreeResultMessageInput,
-      disagreeResultMessage: approvalDisagreeResultMessageInput,
-      hideAfterAction: approvalHideAfterActionInput,
-      refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
-      deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
-      attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
-    },
-  });
-
-  const createDefaultRejectTopicConfig = (sourceThreadId: number): RejectTopicConfig => ({
-    sourceThreadId,
-    rejectCustomMessage: rejectCustomMessageInput,
-  });
-
-  const syncApprovalTopicConfigs = (sourceThreadIds: number[], existing: ApprovalTopicConfig[]) => {
-    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
-    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultApprovalTopicConfig(threadId));
-  };
-
-  const syncRejectTopicConfigs = (sourceThreadIds: number[], existing: RejectTopicConfig[]) => {
-    const map = new Map(existing.map((item) => [item.sourceThreadId, item]));
-    return sourceThreadIds.map((threadId) => map.get(threadId) || createDefaultRejectTopicConfig(threadId));
-  };
 
   const renderGroupTopicSelector = (
     groupIdVal: string,
