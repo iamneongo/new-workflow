@@ -10,6 +10,7 @@ interface ChatsListProps {
   onSearchChange: (query: string) => void;
   onSelectAutomation: (id: string) => void;
   onCreateAutomation: () => void;
+  onCloneAutomation: () => void;
   onReorderAutomation: (draggedId: string, targetId: string) => void;
   chats: Record<string, ChatEntry>;
 }
@@ -21,6 +22,7 @@ export default function ChatsList({
   onSearchChange,
   onSelectAutomation,
   onCreateAutomation,
+  onCloneAutomation,
   onReorderAutomation,
   chats,
 }: ChatsListProps) {
@@ -61,6 +63,33 @@ export default function ChatsList({
         >
           <i className="fa-solid fa-plus" />
           Tạo Automation mới
+        </button>
+
+        <button
+          className="btn btn-secondary"
+          onClick={onCloneAutomation}
+          id="cloneAutomationButton"
+          disabled={automations.length === 0}
+          title={automations.length === 0 ? 'Chưa có automation nào để sao chép' : 'Chọn 1 automation có sẵn và tạo bản sao'}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            marginTop: '8px',
+            background: 'var(--bg-secondary)',
+            color: 'var(--color-text)',
+            border: '1px solid var(--border-color)',
+            padding: '9px',
+            borderRadius: '6px',
+            fontWeight: '600',
+            cursor: automations.length === 0 ? 'not-allowed' : 'pointer',
+            opacity: automations.length === 0 ? 0.5 : 1,
+          }}
+        >
+          <i className="fa-solid fa-copy" />
+          Copy &amp; tạo mới
         </button>
       </div>
 

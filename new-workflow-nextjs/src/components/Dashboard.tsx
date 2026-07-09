@@ -83,6 +83,13 @@ export default function Dashboard() {
     name: string;
   }>({ isOpen: false, name: '' });
 
+  // Clone (copy an existing automation into a new one)
+  const [cloneAutomationModal, setCloneAutomationModal] = useState<{
+    isOpen: boolean;
+    sourceId: string;
+    name: string;
+  }>({ isOpen: false, sourceId: '', name: '' });
+
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -373,6 +380,57 @@ export default function Dashboard() {
       }
     } catch {
       alert('Lỗi kết nối khi tạo automation');
+    }
+  };
+
+  // Open clone modal (prefill with currently selected automation, else the first one)
+  const openCloneAutomationModal = () => {
+    const sourceId = selectedAutomationId || automations[0]?.id || '';
+    const srcAuto = automations.find((a) => a.id === sourceId);
+    setCloneAutomationModal({
+      isOpen: true,
+      sourceId,
+      name: srcAuto ? `${srcAuto.name} (copy)` : '',
+    });
+  };
+
+  // Clone an existing automation into a brand-new one (same config, new id/name).
+  // The clone is created STOPPED (POST doesn't set isListening) so it never
+  // double-processes the same source group until the user reviews & starts it.
+  const handleCloneAutomation = async () => {
+    const source = automations.find((a) => a.id === cloneAutomationModal.sourceId);
+    const name = cloneAutomationModal.name.trim();
+    if (!source || !name) return;
+    const newId = `auto_${Date.now()}`;
+    // Copy full config; drop id/name (overridden), masked token, and runtime-only fields.
+    const {
+      id: _id,
+      name: _name,
+      botToken: _botToken,
+      hasToken: _hasToken,
+      isListening: _isListening,
+      forwardCount: _forwardCount,
+      lastForwardTime: _lastForwardTime,
+      sortOrder: _sortOrder,
+      ...config
+    } = source as AutomationSetup & { hasToken?: boolean };
+    try {
+      const res = await fetch('/api/automations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...config, id: newId, name }),
+      });
+      if (res.ok) {
+        setCloneAutomationModal({ isOpen: false, sourceId: '', name: '' });
+        await fetchAutomations();
+        setSelectedAutomationId(newId);
+        setDetailsTab('config');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Sao chép automation thất bại');
+      }
+    } catch {
+      alert('Lỗi kết nối khi sao chép automation');
     }
   };
 
@@ -779,6 +837,7 @@ export default function Dashboard() {
                 setDetailsTab('config');
               }}
               onCreateAutomation={openCreateAutomationModal}
+              onCloneAutomation={openCloneAutomationModal}
               onReorderAutomation={handleReorderAutomation}
               chats={chats}
             />
@@ -840,6 +899,60 @@ export default function Dashboard() {
               </button>
               <button type="button" onClick={() => void handleCreateAutomation()} style={{ border: 'none', background: 'var(--accent-blue)', color: '#fff', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontWeight: 600 }}>
                 Tạo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cloneAutomationModal.isOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80, padding: '20px' }}>
+          <div style={{ width: '100%', maxWidth: '460px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '14px', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.18)', padding: '18px' }}>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>
+              <i className="fa-solid fa-copy" style={{ marginRight: 8, color: 'var(--accent-blue)' }} />
+              Copy &amp; tạo mới
+            </h3>
+            <p style={{ margin: '8px 0 14px', fontSize: '13px', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
+              Chọn 1 automation có sẵn để sao chép toàn bộ cấu hình sang một luồng mới. Bản sao được tạo ở trạng thái <b>Đã dừng</b> — hãy kiểm tra lại (nhất là nhóm nguồn) rồi mới bật.
+            </p>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px' }}>Sao chép từ:</label>
+            <select
+              value={cloneAutomationModal.sourceId}
+              onChange={(e) => {
+                const sourceId = e.target.value;
+                const srcAuto = automations.find((a) => a.id === sourceId);
+                setCloneAutomationModal((prev) => ({
+                  ...prev,
+                  sourceId,
+                  name: srcAuto ? `${srcAuto.name} (copy)` : prev.name,
+                }));
+              }}
+              style={{ width: '100%', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '10px 12px', fontSize: '14px', outline: 'none', marginBottom: '12px' }}
+            >
+              {automations.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tên luồng mới:</label>
+            <input
+              value={cloneAutomationModal.name}
+              onChange={(e) => setCloneAutomationModal((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="Ví dụ: 26.03 Mr. XYZ"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  void handleCloneAutomation();
+                }
+              }}
+              style={{ width: '100%', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '10px 12px', fontSize: '14px', outline: 'none' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+              <button type="button" onClick={() => setCloneAutomationModal({ isOpen: false, sourceId: '', name: '' })} style={{ border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--color-text)', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer' }}>
+                Hủy
+              </button>
+              <button type="button" onClick={() => void handleCloneAutomation()} style={{ border: 'none', background: 'var(--accent-blue)', color: '#fff', borderRadius: '8px', padding: '8px 12px', cursor: 'pointer', fontWeight: 600 }}>
+                <i className="fa-solid fa-copy" style={{ marginRight: 6 }} />
+                Tạo bản sao
               </button>
             </div>
           </div>
