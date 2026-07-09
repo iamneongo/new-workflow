@@ -770,7 +770,20 @@ export async function saveDatabase(database: Database): Promise<void> {
   const client = await p.connect();
   try {
     await client.query('BEGIN');
-    
+
+    // Prune chats (and their topics) that are no longer part of the full
+    // database state — e.g. groups the Telegram account has left. Both callers
+    // pass the complete DB object loaded via loadDatabase(), so anything absent
+    // here should be removed rather than lingering as a stale entry. Only prune
+    // when the object holds at least one chat, so an unexpectedly empty object
+    // never wipes the whole table.
+    const keepChatIds = Object.keys(database.chats);
+    if (keepChatIds.length > 0) {
+      const placeholders = keepChatIds.map((_, i) => `$${i + 1}`).join(', ');
+      await client.query(`DELETE FROM topics WHERE chat_id NOT IN (${placeholders})`, keepChatIds);
+      await client.query(`DELETE FROM chats WHERE chat_id NOT IN (${placeholders})`, keepChatIds);
+    }
+
     for (const chat of Object.values(database.chats)) {
       const photoData = chat.photoData && chat.photoData.trim() ? chat.photoData : null;
       const photoMime = photoData ? (chat.photoMime?.trim() || 'image/jpeg') : null;

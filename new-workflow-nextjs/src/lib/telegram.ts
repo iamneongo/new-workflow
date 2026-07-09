@@ -285,6 +285,10 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
     console.log(`[Sync] Tìm thấy ${dialogs.length} cuộc hội thoại.`);
     emitRuntimeLog('info', 'sync', `Tìm thấy ${dialogs.length} cuộc hội thoại.`);
 
+    // Track every group/channel the account is still a member of this sync, so
+    // we can prune ones it has left afterwards.
+    const seenChatIds = new Set<string>();
+
     for (const dialog of dialogs) {
       const entity = dialog.entity as any;
       const isGroup = dialog.isGroup;
@@ -294,6 +298,8 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
 
       const chatId = entity.id?.toString();
       if (!chatId) continue;
+
+      seenChatIds.add(chatId);
 
       let chatType: 'group' | 'channel' | 'supergroup' = 'group';
       if (isChannel) chatType = 'channel';
@@ -370,6 +376,24 @@ export async function syncTelegramData(): Promise<{ success: boolean; message?: 
         } catch (topicError: any) {
           console.error(`[Sync] Lỗi topic ${chatEntry.chatTitle}:`, topicError.message);
         }
+      }
+    }
+
+    // Remove groups/channels the account is no longer a member of. Guard on
+    // dialogs.length > 0 so a transient empty/failed fetch never wipes the list
+    // (an empty dialog list means the fetch itself returned nothing, not that
+    // the account genuinely left every chat).
+    if (dialogs.length > 0) {
+      const removed: string[] = [];
+      for (const existingChatId of Object.keys(db.chats)) {
+        if (!seenChatIds.has(existingChatId)) {
+          removed.push(db.chats[existingChatId].chatTitle || existingChatId);
+          delete db.chats[existingChatId];
+        }
+      }
+      if (removed.length > 0) {
+        console.log(`[Sync] Đã gỡ ${removed.length} nhóm/kênh không còn tham gia:`, removed);
+        emitRuntimeLog('info', 'sync', `Đã gỡ ${removed.length} nhóm/kênh không còn tham gia: ${removed.join(', ')}`);
       }
     }
 
