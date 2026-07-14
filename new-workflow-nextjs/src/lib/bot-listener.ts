@@ -467,42 +467,26 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.agreeResultMessage, userFullName, log.original_text || '');
           const headerText = buildApprovalHeaderText(autoSetup, log);
 
-          const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
+          // Bước chọn/hỏi nhà cung ứng đã được gỡ bỏ khỏi quy trình. Sau khi
+          // duyệt, yêu cầu vật tư (nằm trong kênh/topic lắng nghe) được chuyển
+          // thẳng sang trạng thái 'supply_agreed' để sẵn sàng nhận reply nghiệm
+          // thu như cũ. Các loại khác (chấm công, chi phí, phê duyệt) dừng ở
+          // bước phê duyệt.
           const listenMatch = matchesSupplyListenScope(autoSetup, log);
-          emitListenerLog('info', `Kiểm tra kênh/topic lắng nghe: ${listenMatch.matched ? 'khớp' : 'không khớp'} - ${listenMatch.reason}`, {
-            automationId: log.automation_id,
-            step: 'supplier-select',
-          });
-
-          if (listenMatch.matched && supplierRoutes.length > 0) {
-            await p.query("UPDATE workflow_logs SET status = 'supplier_selecting' WHERE id = $1", [logId]);
-            emitListenerLog('info', `Kênh/topic lắng nghe khớp: hiển thị danh sách ${supplierRoutes.length} nhà cung ứng để chọn.`, {
-              automationId: log.automation_id,
-              step: 'supplier-select',
-            });
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
-            await showTransientApprovalNote(baseUrl, log, autoSetup.approvalGroupId, headerText, '🏭 Hãy chọn nhà cung ứng:', {
-              inline_keyboard: supplierRoutes.map((route) => ([
-                { text: route.name, callback_data: `supplier_select:${logId}:${route.id}` },
-              ])),
-            });
-            return;
-          }
-
           if (listenMatch.matched) {
-            emitListenerLog('warn', 'Tin ở kênh/topic lắng nghe không có nhà cung ứng cấu hình hợp lệ, không thể mở nhánh supplier.', {
+            await p.query("UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1", [logId]);
+            emitListenerLog('info', `Yêu cầu vật tư đã duyệt — sẵn sàng nghiệm thu (đã bỏ bước nhà cung ứng). ${listenMatch.reason}`, {
               automationId: log.automation_id,
-              step: 'supplier-select',
+              step: 'approval',
             });
-            await updateCallbackStatus('❌ Chưa cấu hình nhà cung ứng cho kênh/topic này.', 'callback missing supplier route');
           } else {
-            emitListenerLog('info', 'Tin nhắn không nằm trong kênh/topic lắng nghe của Bước 3, dừng ở bước phê duyệt và không đi sang supplier.', {
+            emitListenerLog('info', 'Tin nhắn không nằm trong kênh/topic lắng nghe vật tư, dừng ở bước phê duyệt.', {
               automationId: log.automation_id,
-              step: 'supplier-select',
+              step: 'approval',
             });
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
-            return;
           }
+          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+          return;
 
         } else if (action === 'appr_disagree') {
           if (log.status !== 'pending') {
@@ -557,261 +541,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }, 'reject notice');
           await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`);
 
-        } else if (action === 'supplier_select') {
-          if (parts.length < 3) {
-            await updateCallbackStatus('❌ Thiếu thông tin nhà cung ứng đã chọn.', 'callback missing supplier id');
-            return;
-          }
-          const routeId = parts[2];
-          const supplierRoutes = getConfiguredSupplierRoutes(autoSetup);
-          const selectedRoute = supplierRoutes.find((route) => route.id === routeId);
-          const supplierSelectHeaderText = buildApprovalHeaderText(autoSetup, log);
-          if (!selectedRoute) {
-            await updateCallbackStatus('❌ Nhà cung ứng đã chọn không còn hợp lệ.', 'callback invalid supplier');
-            return;
-          }
-
-          emitListenerLog('info', `Đã chọn nhà cung ứng "${selectedRoute.name}".`, {
-            automationId: log.automation_id,
-            step: 'supplier-select',
-          });
-
-          emitListenerLog('info', `Đang gửi tới supplier ${selectedRoute.name} (chat_id=${selectedRoute.groupId}${selectedRoute.threadId !== null ? `, topic=${selectedRoute.threadId}` : ''}).`, {
-            automationId: log.automation_id,
-            step: 'supplier-select',
-          });
-
-          void (async () => {
-          const supplyText = withProjectTag(log.original_text, `💬 *YÊU CẦU CUNG CẤP VẬT TƯ*\n\nNội dung: ${log.original_text || '[Media]'}\n\nVui lòng lựa chọn phương án:`);
-          const supplyReplyMarkup = {
-            inline_keyboard: [
-              [
-                { text: '✅ Đồng ý cấp vật tư', callback_data: `supply_agree:${logId}` },
-              ],
-              [
-                { text: '❌ Không đồng ý cấp vật tư', callback_data: `supply_reject:${logId}` },
-                { text: '🔄 Yêu cầu thay đổi vật tư', callback_data: `supply_change:${logId}` },
-              ]
-            ]
-          };
-          // A single photo/document/video can be attached directly to the
-          // supply prompt via copyMessage (caption + buttons), same as the
-          // approval card. Albums can't carry an inline keyboard, so they
-          // still get a plain text prompt plus the relayed album below it.
-          const promptPromise = log.original_has_media
-            ? sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
-                chat_id: selectedRoute.groupId,
-                message_thread_id: selectedRoute.threadId || undefined,
-                from_chat_id: log.original_chat_id,
-                message_id: log.original_msg_id,
-                caption: supplyText,
-                reply_markup: supplyReplyMarkup,
-              }, `supplier route ${selectedRoute.name} (media)`)
-            : sendTelegramMessageWithFallback(baseUrl, {
-                chat_id: selectedRoute.groupId,
-                message_thread_id: selectedRoute.threadId || undefined,
-                text: supplyText,
-                reply_markup: supplyReplyMarkup,
-              }, `supplier route ${selectedRoute.name}`);
-
-          const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
-            ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
-            : [Number(log.original_msg_id)];
-          const isAlbum = originalMsgIds.length > 1;
-
-          const sendMethod: 'forwardMessage' | 'copyMessage' = selectedRoute.messageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
-          const contentPromise = isAlbum
-            ? sendTelegramMethodWithFallback(baseUrl, sendMethod, {
-                chat_id: selectedRoute.groupId,
-                message_thread_id: selectedRoute.threadId || undefined,
-                from_chat_id: log.original_chat_id,
-                message_id: log.original_msg_id,
-                message_ids: originalMsgIds,
-              }, `supplier route content ${selectedRoute.name}`)
-            : Promise.resolve({ ok: true } as { ok: boolean; result?: any; description?: string });
-
-          const [promptData, contentData] = await Promise.all([promptPromise, contentPromise]);
-
-          if (!promptData.ok) {
-            const promptError = promptData.description || 'unknown error';
-            const promptHint = /chat not found/i.test(promptError)
-              ? 'Bot chưa được thêm vào nhóm/kênh đích hoặc chat_id đang sai.'
-              : '';
-            emitListenerLog('error', `Không gửi được prompt nhà cung ứng "${selectedRoute.name}" tới chat ${selectedRoute.groupId}: ${promptData.description || 'unknown error'}`, {
-              automationId: log.automation_id,
-              step: 'supplier-select',
-            });
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `❌ Không gửi được prompt đến ${selectedRoute.name}.${promptHint ? ` ${promptHint}` : ''}`);
-            return;
-          }
-
-          await p.query(
-            `UPDATE workflow_logs
-             SET status = 'supply_sent',
-                 supply_msg_id = $1,
-                 supplier_route_id = $2,
-                 selected_supplier_group_id = $3,
-                 selected_supplier_thread_id = $4,
-                 supply_prompt_group_id = $5,
-                 supply_prompt_thread_id = $6
-             WHERE id = $7`,
-            [
-              promptData.result.message_id,
-              selectedRoute.id,
-              selectedRoute.groupId,
-              selectedRoute.threadId,
-              selectedRoute.groupId,
-              selectedRoute.threadId,
-              logId,
-            ]
-          );
-
-          if (!contentData.ok) {
-            const contentError = contentData.description || 'unknown error';
-            const contentHint = /chat not found/i.test(contentError)
-              ? 'Bot chưa được thêm vào nhóm/kênh đích hoặc chat_id đang sai.'
-              : '';
-            emitListenerLog('error', `Không chuyển được nội dung sang ${selectedRoute.name}: ${contentData.description || 'unknown error'}`, {
-              automationId: log.automation_id,
-              step: 'supplier-select',
-            });
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `⚠️ Đã chọn ${selectedRoute.name}, nhưng chưa chuyển được nội dung.${contentHint ? ` ${contentHint}` : ''}`);
-            return;
-          }
-
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplierSelectHeaderText, `✅ Đã chọn NCC: ${selectedRoute.name}`);
-        })().catch((err: any) => {
-          emitListenerLog('error', `Xử lý nhà cung ứng "${selectedRoute.name}" lỗi: ${err.message}`, {
-            automationId: log.automation_id,
-            step: 'supplier-select',
-          });
-          void updateCallbackStatus(`❌ Xử lý nhà cung ứng lỗi: ${err.message}`, 'supplier error ack');
-        });
-
-        return;
-
-      } else if (action === 'supply_agree') {
-        if (log.status !== 'supply_sent') {
-          await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale supply agree');
-          return;
         }
-
-        const expectedSupplyListenTarget = resolveSupplyListenTarget(autoSetup, log);
-        if (expectedSupplyListenTarget.groupIds.length > 0 && !matchesSupplyListenGroup(cq.message.chat.id, autoSetup, log)) {
-          await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.groupIds.join(', ')}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply agree mismatch');
-          return;
-        }
-        if (expectedSupplyListenTarget.threadIds.length > 0) {
-          const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (!matchesSupplyListenThread(actualThreadId, autoSetup, log)) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply agree topic mismatch');
-            return;
-          }
-        }
-
-        const supplyAgreeClaim = await p.query(
-          "UPDATE workflow_logs SET status = 'supply_agreed' WHERE id = $1 AND status = 'supply_sent' RETURNING id",
-          [logId]
-        );
-        if (supplyAgreeClaim.rows.length === 0) {
-          // Đã được một lần xử lý khác (vd. update bị Telegram gửi lại sau khi service restart) giành xử lý trước.
-          return;
-        }
-        const supplyAgreeHeaderText = buildApprovalHeaderText(autoSetup, log);
-
-        if (log.original_has_media) {
-          await editTelegramMessageCaptionWithFallback(baseUrl, {
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            caption: `${originalCleanText}\n\n✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`,
-          }, 'supply agree prompt');
-        } else {
-          await editTelegramMessageWithFallback(baseUrl, {
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            text: `${originalCleanText}\n\n✅ *ĐỒNG Ý CẤP VẬT TƯ* bởi ${userFullName}`,
-          }, 'supply agree prompt');
-        }
-
-        // Thẻ trạng thái duy nhất đã ghi nhận đủ "đang giao đến công trình",
-        // không cần gửi thêm tin THÔNG BÁO GIAO NHẬN VẬT TƯ riêng vào nhóm giao
-        // nhận nữa (vốn thường trùng nhóm với nhóm phê duyệt).
-        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `✅ Đã đồng ý cấp vật tư — ${userFullName}`);
-        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyAgreeHeaderText, `📦 Đang giao đến công trình`);
-
-      } else if (action === 'supply_reject' || action === 'supply_change') {
-        if (log.status !== 'supply_sent') {
-          await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale supply decision');
-          return;
-        }
-
-        const expectedSupplyListenTarget = resolveSupplyListenTarget(autoSetup, log);
-        if (expectedSupplyListenTarget.groupIds.length > 0 && !matchesSupplyListenGroup(cq.message.chat.id, autoSetup, log)) {
-          await updateCallbackStatus(`⚠️ Bỏ qua vì chat không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.groupIds.join(', ')}\nThực tế: ${String(cq.message.chat.id)}`, 'callback supply decision mismatch');
-          return;
-        }
-        if (expectedSupplyListenTarget.threadIds.length > 0) {
-          const actualThreadId = normalizeThreadId(cq.message.message_thread_id);
-          if (!matchesSupplyListenThread(actualThreadId, autoSetup, log)) {
-            await updateCallbackStatus(`⚠️ Bỏ qua vì topic không khớp.\nKỳ vọng: ${expectedSupplyListenTarget.threadIds.join(', ')}\nThực tế: ${actualThreadId ?? 'general'}`, 'callback supply decision topic mismatch');
-            return;
-          }
-        }
-
-        const isChange = action === 'supply_change';
-        const newStatus = isChange ? 'supply_changed' : 'supply_rejected';
-        const supplyDecisionHeaderText = buildApprovalHeaderText(autoSetup, log);
-
-        const supplyDecisionClaim = await p.query(
-          "UPDATE workflow_logs SET status = $1 WHERE id = $2 AND status = 'supply_sent' RETURNING id",
-          [newStatus, logId]
-        );
-        if (supplyDecisionClaim.rows.length === 0) {
-          return;
-        }
-
-        const statusLabel = isChange ? '🔄 YÊU CẦU THAY ĐỔI VẬT TƯ' : '❌ TỪ CHỐI CUNG CẤP VẬT TƯ';
-        if (log.original_has_media) {
-          await editTelegramMessageCaptionWithFallback(baseUrl, {
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            caption: `${originalCleanText}\n\n${statusLabel} bởi ${userFullName}`,
-          }, 'supply decision prompt');
-        } else {
-          await editTelegramMessageWithFallback(baseUrl, {
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            text: `${originalCleanText}\n\n${statusLabel} bởi ${userFullName}`,
-          }, 'supply decision prompt');
-        }
-
-        // Send reject/change notification
-        const rejectTarget = resolveSupplyRejectTarget(autoSetup, log);
-        if (!isChange && !rejectTarget.groupId) {
-          console.warn(`[BotListener] Reject target is not configured for automation: ${log.automation_id}.`);
-          await updateCallbackStatus('❌ Chưa có nhóm nào để nhận thông báo từ chối.', 'callback missing reject group');
-          return;
-        }
-        if (!isChange && rejectTarget.usedFallback) {
-          emitListenerLog('warn', 'Chưa cấu hình nhóm từ chối riêng, dùng nhóm vật tư hiện tại làm nơi nhận thông báo từ chối.', {
-            automationId: log.automation_id,
-            step: 'supplier-select',
-          });
-        }
-        const rejectText = withProjectTag(log.original_text, isChange
-          ? `🔄 *THÔNG BÁO YÊU CẦU THAY ĐỔI VẬT TƯ*\n\nPhương án: Yêu cầu thay đổi vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}\n\n👉 Hãy trả lời ngay dưới tin nhắn này. Bot sẽ chuyển tiếp nội dung phản hồi sang nhóm/topic đã cấu hình để mọi người cùng nắm được đề xuất thay đổi.`
-          : `❌ *THÔNG BÁO TỪ CHỐI CUNG CẤP VẬT TƯ*\n\nPhương án: Từ chối cung cấp vật tư bởi ${userFullName}\nNội dung ban đầu: ${log.original_text || '[Media]'}`);
-        await sendDividerMessageIfNeeded(baseUrl, isChange ? cq.message.chat.id : rejectTarget.groupId, isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined), 'reject/change notice');
-        const rejectData = await sendTelegramMessageWithFallback(baseUrl, {
-          chat_id: isChange ? cq.message.chat.id : rejectTarget.groupId,
-          message_thread_id: isChange ? (cq.message.message_thread_id || undefined) : (rejectTarget.threadId || undefined),
-          text: rejectText,
-        }, 'reject/change notice');
-        if (isChange && rejectData.ok) {
-          await p.query("UPDATE workflow_logs SET supply_change_msg_id = $1 WHERE id = $2", [rejectData.result.message_id, logId]);
-        }
-        await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, supplyDecisionHeaderText, `${statusLabel} bởi ${userFullName}`);
-      }
       } finally {
         global.__processingCallbackActions!.delete(actionKey);
       }
