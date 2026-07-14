@@ -484,14 +484,14 @@ export default function ChatDetails({
         updates.approvalTopicConfigs = approvalTopicConfigsInput;
       }
       if (field === 'supply') {
-        updates.supplyGroupId = supplyGroupIdInput;
-        updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
-        updates.supplierSelectionHideAfterAction = supplierSelectionHideAfterActionInput;
-        updates.supplyPromptHideAfterAction = supplyPromptHideAfterActionInput;
+        updates.supplyGroupId = '';
+        updates.supplyThreadId = null;
+        updates.supplierSelectionHideAfterAction = false;
+        updates.supplyPromptHideAfterAction = false;
         updates.supplyListenGroupId = supplyListenGroupIdInput;
         updates.supplyListenThreadIds = supplyListenThreadIdsInput;
         updates.supplyListenThreadId = supplyListenThreadIdsInput[0] ?? null;
-        updates.supplierRoutes = supplierRoutesInput;
+        updates.supplierRoutes = [];
       }
       if (field === 'supplyChange') {
         updates.supplyChangeGroupId = supplyChangeGroupIdInput;
@@ -1809,7 +1809,7 @@ export default function ChatDetails({
     if (field === 'source') return !automation.sourceGroupId;
     if (field === 'bot') return !automation.botToken;
     if (field === 'approval') return !automation.approvalGroupId;
-    if (field === 'supply') return !automation.supplyGroupId && (!automation.supplierRoutes || automation.supplierRoutes.length === 0);
+    if (field === 'supply') return !automation.supplyListenGroupId;
     if (field === 'supplyChange') return !automation.supplyChangeGroupId;
     if (field === 'delivery') return !automation.deliveryGroupId;
     if (field === 'final') return !automation.finalGroupId;
@@ -2751,73 +2751,29 @@ export default function ChatDetails({
                 >
                   <div className="node-icon">📝</div>
                   <div className="node-content">
-                    <span className="node-tag">Bước 3: Lựa chọn vật tư</span>
-                    <h5 className="node-title">Hỏi phương án cung cấp</h5>
+                    <span className="node-tag">Bước 3: Nhận diện vật tư</span>
+                    <h5 className="node-title">Đánh dấu yêu cầu vật tư để nghiệm thu</h5>
                     
                     {editCard === 'supply' ? (
                       <div id="tour-supply-editor" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                          Chọn nhóm nguồn và các topic vật tư. Yêu cầu ở những topic này, sau khi được duyệt, sẽ sẵn sàng cho bước nghiệm thu.
+                        </div>
                         {renderGroupTopicSelector(
-                          supplyGroupIdInput,
-                          setSupplyGroupIdInput,
-                          supplyThreadIdInput,
-                          setSupplyThreadIdInput,
+                          supplyListenGroupIdInput,
+                          setSupplyListenGroupIdInput,
+                          supplyListenThreadIdsInput,
+                          setSupplyListenThreadIdsInput,
                           () => setEditCard(null),
                           () => handleSaveCard('supply'),
                           undefined,
-                          { selectorId: 'supply' }
+                          { selectorId: 'supply-listen', topicLabel: 'Chọn topic vật tư (để nghiệm thu):' }
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsSupplyConfigDrawerOpen(true);
-                          }}
-                          style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
-                        >
-                          Mở phần gửi tin
-                        </button>
-                        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                            <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nhà cung ứng và nhóm bot theo dõi</strong>
-                            <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
-                              {supplierRoutesInput.length > 0 ? `${supplierRoutesInput.length} nhà cung ứng` : 'Chưa có nhà cung ứng'}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                            Bạn mở phần này để thêm nhà cung ứng, chọn cách bot gửi tin và chọn nhóm bot sẽ theo dõi ở bước 3.
-                          </div>
-                        </div>
-                        <div style={{ display: 'none' }}>
-                        <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
-                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600', marginBottom: '4px' }}>
-                            Cài đặt kênh lắng nghe
-                          </div>
-                          {renderGroupTopicSelector(
-                            supplyListenGroupIdInput,
-                            setSupplyListenGroupIdInput,
-                            supplyListenThreadIdsInput,
-                            setSupplyListenThreadIdsInput,
-                            () => setEditCard(null),
-                            () => handleSaveCard('supply'),
-                            undefined,
-                            { selectorId: 'supply-listen', topicLabel: 'Chọn topic lắng nghe:' }
-                          )}
-                        </div>
-                        </div>
                       </div>
                     ) : (
                       <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {automation.supplyGroupId ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                            <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Nhóm mặc định:</span>
-                            {renderGroupTopicBadge(automation.supplyGroupId, automation.supplyThreadId)}
-                          </div>
-                        ) : (
-                          <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm lựa chọn vật tư.</span>
-                        )}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic lắng nghe:</span>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic vật tư:</span>
                           {automation.supplyListenGroupId
                             ? renderGroupTopicBadge(
                               automation.supplyListenGroupId,
@@ -2826,12 +2782,12 @@ export default function ChatDetails({
                                 : automation.supplyListenThreadId
                             )
                             : (
-                              <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Dùng mặc định theo nhóm phía trên</span>
+                              <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn topic vật tư dùng cho bước nghiệm thu.</span>
                             )}
                         </div>
 
                         <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                          Nhánh lắng nghe: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}
+                          Sau khi duyệt, yêu cầu từ các topic này sẽ đi thẳng sang luồng giao nhận và nghiệm thu.
                         </div>
                       </div>
                     )}
@@ -2844,15 +2800,15 @@ export default function ChatDetails({
                   </svg>
                 </div>
 
-                {/* Sub-split */}
+                {/* Sub-split (đã gỡ bước nhà cung ứng — chỉ còn nhánh giao nhận/nghiệm thu) */}
                 <div className="workflow-split-container">
-                  <div className="workflow-split-line">
+                  <div className="workflow-split-line" style={{ display: 'none' }}>
                     <div className="split-horizontal-line"></div>
                   </div>
 
                   <div className="workflow-branches">
-                    {/* Sub-branch Left: Disagree/Change */}
-                    <div className="workflow-branch branch-left">
+                    {/* Sub-branch Left (đã gỡ bước nhà cung ứng — ẩn nhánh từ chối/đổi vật tư) */}
+                    <div className="workflow-branch branch-left" style={{ display: 'none' }}>
                       <span className="branch-label label-neutral">Từ chối</span>
                       <div className="workflow-arrow-v">
                         <svg width="2" height="20" viewBox="0 0 2 20" fill="none">
@@ -2936,15 +2892,8 @@ export default function ChatDetails({
                       </div>
                     </div>
 
-                    {/* Sub-branch Right: Agree Supply */}
+                    {/* Sub-branch Right: sau khi duyệt vật tư → giao nhận & nghiệm thu */}
                     <div className="workflow-branch branch-right">
-                      <span className="branch-label label-agree">Đồng ý cấp</span>
-                      <div className="workflow-arrow-v">
-                        <svg width="2" height="20" viewBox="0 0 2 20" fill="none">
-                          <line x1="1" y1="0" x2="1" y2="20" stroke="var(--border-color)" strokeWidth="2" />
-                        </svg>
-                      </div>
-
                       {/* ── NODE 4: DELIVERY GROUP CONFIG ── */}
                       <div 
                         id="tour-node-delivery"
