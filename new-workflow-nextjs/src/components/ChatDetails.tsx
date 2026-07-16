@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig, RejectTopicConfig } from '@/lib/automation-types';
+import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, SupplyChangeMessageMode, ApprovalTopicConfig, RejectTopicConfig } from '@/lib/automation-types';
 import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_REJECT_CUSTOM_MESSAGE } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
@@ -104,9 +104,6 @@ export default function ChatDetails({
   const [isSupplyConfigDrawerOpen, setIsSupplyConfigDrawerOpen] = useState(false);
   const [isSupplyChangeDrawerOpen, setIsSupplyChangeDrawerOpen] = useState(false);
 
-  const [finalMessageModeInput, setFinalMessageModeInput] = useState<FinalMessageMode>('forward');
-  const [isFinalConfigDrawerOpen, setIsFinalConfigDrawerOpen] = useState(false);
-
   const [finalGroupIdInput, setFinalGroupIdInput] = useState('');
   const [finalThreadIdInput, setFinalThreadIdInput] = useState<number | ''>('');
 
@@ -146,9 +143,6 @@ export default function ChatDetails({
     if (editCard !== 'supplyChange') {
       setIsSupplyChangeDrawerOpen(false);
     }
-    if (editCard !== 'final') {
-      setIsFinalConfigDrawerOpen(false);
-    }
     if (editCard !== 'reject') {
       setIsRejectConfigDrawerOpen(false);
     }
@@ -174,7 +168,6 @@ export default function ChatDetails({
       || isApprovalTopicDrawerOpen
       || isSupplyConfigDrawerOpen
       || isSupplyChangeDrawerOpen
-      || isFinalConfigDrawerOpen
       || isRejectConfigDrawerOpen
     );
     if (!hasOpenDrawer) return;
@@ -185,7 +178,6 @@ export default function ChatDetails({
         setIsApprovalTopicDrawerOpen(false);
         setIsSupplyConfigDrawerOpen(false);
         setIsSupplyChangeDrawerOpen(false);
-        setIsFinalConfigDrawerOpen(false);
         setIsRejectConfigDrawerOpen(false);
       }
     };
@@ -197,7 +189,6 @@ export default function ChatDetails({
     isApprovalTopicDrawerOpen,
     isSupplyConfigDrawerOpen,
     isSupplyChangeDrawerOpen,
-    isFinalConfigDrawerOpen,
     isRejectConfigDrawerOpen,
   ]);
 
@@ -253,8 +244,6 @@ export default function ChatDetails({
       setSupplyChangeGroupIdInput(automation.supplyChangeGroupId || '');
       setSupplyChangeThreadIdInput(automation.supplyChangeThreadId !== null && automation.supplyChangeThreadId !== undefined ? automation.supplyChangeThreadId : '');
       setSupplyChangeMessageModeInput(automation.supplyChangeMessageMode || 'forward');
-
-      setFinalMessageModeInput(automation.finalMessageMode || 'forward');
 
       setFinalGroupIdInput(automation.finalGroupId || '');
       setFinalThreadIdInput(automation.finalThreadId !== null && automation.finalThreadId !== undefined ? automation.finalThreadId : '');
@@ -475,7 +464,7 @@ export default function ChatDetails({
       if (field === 'final') {
         updates.finalGroupId = finalGroupIdInput;
         updates.finalThreadId = finalThreadIdInput === '' ? null : Number(finalThreadIdInput);
-        updates.finalMessageMode = finalMessageModeInput;
+        updates.finalMessageMode = 'copy';
       }
       if (field === 'reject') {
         updates.rejectGroupId = rejectGroupIdInput;
@@ -811,7 +800,6 @@ export default function ChatDetails({
       (isApprovalMessageDrawerOpen && editCard === 'approval')
       || (isSupplyConfigDrawerOpen && editCard === 'supply')
       || (isSupplyChangeDrawerOpen && editCard === 'supplyChange')
-      || (isFinalConfigDrawerOpen && editCard === 'final')
       || (isRejectConfigDrawerOpen && editCard === 'reject');
 
     const effectiveFooterNote = shouldAutoSaveOnDone
@@ -839,12 +827,6 @@ export default function ChatDetails({
       if (isSupplyChangeDrawerOpen && editCard === 'supplyChange') {
         await handleSaveCard('supplyChange', { closeCard: false });
         setIsSupplyChangeDrawerOpen(false);
-        return;
-      }
-
-      if (isFinalConfigDrawerOpen && editCard === 'final') {
-        await handleSaveCard('final', { closeCard: false });
-        setIsFinalConfigDrawerOpen(false);
         return;
       }
 
@@ -1072,25 +1054,6 @@ export default function ChatDetails({
     </div>
   );
 
-  const finalConfigPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách bot gửi tin ở bước nghiệm thu</label>
-        <select
-          value={finalMessageModeInput}
-          onChange={(e) => setFinalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
-          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
-        >
-          <option value="forward">Gửi nguyên tin rồi thêm phần tổng hợp</option>
-          <option value="copy">Sao chép tin rồi thêm phần tổng hợp</option>
-        </select>
-      </div>
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-        Bạn dùng phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
-      </div>
-    </div>
-  );
-
   const rejectConfigPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1277,16 +1240,6 @@ export default function ChatDetails({
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(249, 115, 22, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(249, 115, 22, 0.2)' }}>
         <span>📣</span>
-        <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{label}</span>
-      </span>
-    );
-  };
-
-  const renderFinalModeBadge = (mode: FinalMessageMode) => {
-    const label = mode === 'copy' ? 'Sao chép tin cuối' : 'Gửi nguyên tin cuối';
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(168, 85, 247, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-        <span>📦</span>
         <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{label}</span>
       </span>
     );
@@ -2755,37 +2708,7 @@ export default function ChatDetails({
                                 setFinalThreadIdInput,
                                 () => setEditCard(null),
                                 () => handleSaveCard('final'),
-                                <div id="tour-final-extra-controls" style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setIsFinalConfigDrawerOpen(true);
-                                    }}
-                                    style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
-                                  >
-                                    Mở phần gửi tin
-                                  </button>
-                                  <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Tin nhắn bước nghiệm thu</strong>
-                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                                      Bạn mở phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
-                                    </div>
-                                  </div>
-                                  <div style={{ display: 'none' }}>
-                                  <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách gửi phản hồi cuối:</label>
-                                  <select
-                                    id="tour-final-message-mode"
-                                    value={finalMessageModeInput}
-                                    onChange={(e) => setFinalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
-                                    style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
-                                  >
-                                    <option value="forward">Gửi nguyên tin + lời nhắn tổng hợp</option>
-                                    <option value="copy">Sao chép tin + lời nhắn tổng hợp</option>
-                                  </select>
-                                  </div>
-                                </div>,
+                                undefined,
                                 { selectorId: 'final' }
                               )}
                             </div>
@@ -2796,9 +2719,6 @@ export default function ChatDetails({
                                   renderGroupTopicBadge(automation.finalGroupId, automation.finalThreadId)
                                 ) : (
                                   <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để cấu hình nhóm nghiệm thu.</span>
-                                )}
-                                {automation.finalMessageMode && (
-                                  <span style={{ marginLeft: '6px' }}>{renderFinalModeBadge(automation.finalMessageMode)}</span>
                                 )}
                               </div>
 
@@ -2855,15 +2775,6 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi lại phản hồi đổi vật tư.',
         () => setIsSupplyChangeDrawerOpen(false),
         supplyChangeConfigPanel,
-        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
-      )}
-
-      {renderDrawerShell(
-        isFinalConfigDrawerOpen && editCard === 'final',
-        'Tin nhắn bước nghiệm thu',
-        'Bạn chọn cách bot gửi tin cuối sang nhóm nghiệm thu.',
-        () => setIsFinalConfigDrawerOpen(false),
-        finalConfigPanel,
         'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 

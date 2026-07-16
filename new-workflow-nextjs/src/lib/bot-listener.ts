@@ -814,8 +814,8 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[], forced
           const finalSameChatAsApproval = normalizeComparableChatId(autoSetup.finalGroupId) === normalizeComparableChatId(autoSetup.approvalGroupId);
           const finalHeader = finalSameChatAsApproval
             ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*`
-            : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
-          const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+            : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*.`);
+          const finalContentMethod = 'copyMessage';
           const finalRelayMsgIds = forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0 ? forcedAlbumMsgIds : [msg.message_id];
           const acceptanceHasMedia = Boolean(
             forcedAlbumMsgIds?.length || msg.photo || msg.document || msg.video || msg.animation || msg.audio
