@@ -1945,9 +1945,33 @@ function formatSourceReplyRefreshText(
   replyText: string,
   senderFullName: string
 ): string {
-  const originalBlock = originalText?.trim() ? originalText.trim() : '[Không có nội dung cũ]';
+  const history = extractSourceReplyHistory(originalText);
   const replyBlock = replyText?.trim() ? replyText.trim() : '[Hình ảnh/Tài liệu]';
-  return `Yêu cầu cũ:\n${originalBlock}\n\nCập nhật mới từ ${senderFullName}:\n${replyBlock}`;
+  const historyBlock = history
+    .map((content, index) => `Yêu cầu cũ lần ${index + 1}:\n${content}`)
+    .join('\n\n');
+  return `${historyBlock}\n\nCập nhật mới từ ${senderFullName}:\n${replyBlock}`;
+}
+
+function extractSourceReplyHistory(originalText: string): string[] {
+  const normalized = originalText?.trim() || '[Không có nội dung cũ]';
+  const headerPattern = /(?:^|\n+)(?:Yêu cầu cũ(?: lần \d+)?|Cập nhật mới từ [^:\n]+):\n/g;
+  const matches = Array.from(normalized.matchAll(headerPattern));
+  if (matches.length === 0) return [normalized];
+
+  const history: string[] = [];
+  const preamble = normalized.slice(0, matches[0].index).trim();
+  if (preamble) history.push(preamble);
+
+  matches.forEach((match, index) => {
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : normalized.length;
+    const content = normalized.slice(start, end).trim();
+    // Legacy nested output can contain several consecutive empty "Yêu cầu cũ" headers.
+    if (content) history.push(content);
+  });
+
+  return history.length > 0 ? history : ['[Không có nội dung cũ]'];
 }
 
 function resolveSupplyListenScope(autoSetup: any): { groupId: string; threadIds: number[] } {
