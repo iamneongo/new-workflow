@@ -396,15 +396,22 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackQueryId = cq.id;
       const userFullName = [cq.from.first_name, cq.from.last_name].filter(Boolean).join(' ') || cq.from.username || 'Thành viên';
 
-      // Stop Telegram's loading spinner quickly. Network trouble here must not
-      // hold the approval decision open indefinitely.
-      await answerTelegramCallback(baseUrl, callbackQueryId, 'Đang xử lý lựa chọn...');
-
       const parts = data.split(':');
-      if (parts.length < 2) return;
+      if (parts.length < 2) {
+        void answerTelegramCallback(baseUrl, callbackQueryId, 'Lựa chọn không hợp lệ.');
+        return;
+      }
       const action = parts[0];
       const logId = Number(parts[1]);
-      const actionKey = `${logId}:${action}`;
+      const actionLabel = action === 'appr_agree' ? 'Đồng ý' : action === 'appr_disagree' ? 'Không đồng ý' : 'lựa chọn';
+
+      // Answer in parallel so Telegram's spinner and toast don't wait for any
+      // database or message-edit work below.
+      void answerTelegramCallback(baseUrl, callbackQueryId, `Đã nhận: ${actionLabel}`);
+
+      // Agree and disagree belong to the same decision. A second tap on either
+      // button must not start another handler while the first is still active.
+      const actionKey = `${logId}:approval-decision`;
       if (global.__processingCallbackActions!.has(actionKey)) {
         return;
       }
@@ -419,9 +426,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackCardIsMedia = Boolean(cq.message?.photo || cq.message?.document || cq.message?.video);
       const updateCallbackStatus = async (bodyText: string, label: string) => {
         if (!callbackChatId || !callbackMessageId) return;
-        const editFn = callbackCardIsMedia ? editTelegramMessageCaptionWithFallback : editTelegramMessageWithFallback;
+        const method = callbackCardIsMedia ? 'editMessageCaption' : 'editMessageText';
         const textField = callbackCardIsMedia ? 'caption' : 'text';
-        await editFn(baseUrl, {
+        await editTelegramCallbackCardFast(baseUrl, method, {
           chat_id: callbackChatId,
           message_id: callbackMessageId,
           [textField]: `${originalCleanText}\n\n${bodyText}`,
@@ -445,7 +452,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
         if (action === 'appr_agree') {
           if (log.status !== 'pending') {
-            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale approval');
             return;
           }
 
@@ -478,6 +484,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               step: 'approval',
             });
           }
+          await updateCallbackStatus(`✅ ${approvalDecisionText || 'Đã đồng ý'}`, 'callback approval immediate');
           runCallbackSideEffects(`approval ${logId}`, async () => {
             await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
           });
@@ -485,7 +492,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
         } else if (action === 'appr_disagree') {
           if (log.status !== 'pending') {
-            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale reject');
             return;
           }
 
@@ -527,6 +533,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               : [Number(log.original_msg_id)].filter(Boolean))
             : [];
 
+          await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
           runCallbackSideEffects(`rejection ${logId}`, async () => {
             const deleteJobs = originalMsgIds.map((msgId) => deleteTelegramMessage(baseUrl, {
               chat_id: log.original_chat_id,
@@ -2148,6 +2155,36 @@ async function answerTelegramCallback(baseUrl: string, callbackQueryId: string, 
       ? 'request timeout after 3s'
       : (error?.message || String(error));
     console.warn(`[BotListener] Telegram answerCallbackQuery failed (non-fatal): ${message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function editTelegramCallbackCardFast(
+  baseUrl: string,
+  method: 'editMessageText' | 'editMessageCaption',
+  payload: Record<string, unknown>,
+  label: string
+): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    const res = await fetch(`${baseUrl}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const data = await res.json() as any;
+    if (!data.ok) {
+      console.warn(`[BotListener] Fast callback edit failed (${label}): ${data.description || res.status}`);
+    }
+  } catch (error: any) {
+    const message = error?.name === 'AbortError'
+      ? 'request timeout after 3s'
+      : (error?.message || String(error));
+    console.warn(`[BotListener] Fast callback edit failed (${label}, non-fatal): ${message}`);
   } finally {
     clearTimeout(timeout);
   }
