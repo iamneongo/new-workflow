@@ -484,9 +484,26 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               step: 'approval',
             });
           }
+          const originalMsgIds: number[] = log.original_chat_id
+            ? (typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+              : [Number(log.original_msg_id)].filter(Boolean))
+            : [];
           await updateCallbackStatus(`✅ ${approvalDecisionText || 'Đã đồng ý'}`, 'callback approval immediate');
           runCallbackSideEffects(`approval ${logId}`, async () => {
-            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+            const results = await Promise.allSettled([
+              appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`),
+              ...originalMsgIds.map((msgId) => reactToTelegramMessage(
+                baseUrl,
+                log.original_chat_id,
+                msgId,
+                'approved source message'
+              )),
+            ]);
+            const rejectedResult = results.find((result) => result.status === 'rejected');
+            if (rejectedResult?.status === 'rejected') {
+              throw rejectedResult.reason;
+            }
           });
           return;
 
@@ -535,13 +552,15 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
           runCallbackSideEffects(`rejection ${logId}`, async () => {
-            const deleteJobs = originalMsgIds.map((msgId) => deleteTelegramMessage(baseUrl, {
-              chat_id: log.original_chat_id,
-              message_id: msgId,
-            }, 'rejected source message'));
+            const unreactJobs = originalMsgIds.map((msgId) => unreactTelegramMessage(
+              baseUrl,
+              log.original_chat_id,
+              msgId,
+              'rejected source message'
+            ));
 
             const results = await Promise.allSettled([
-              ...deleteJobs,
+              ...unreactJobs,
               sendTelegramMessageWithFallback(baseUrl, {
                 chat_id: rejectTarget.groupId,
                 message_thread_id: rejectTarget.threadId || undefined,
