@@ -493,11 +493,12 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           runCallbackSideEffects(`approval ${logId}`, async () => {
             const results = await Promise.allSettled([
               appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`),
-              ...originalMsgIds.map((msgId) => reactToTelegramMessage(
+              ...originalMsgIds.map((msgId) => reactToTelegramMessageReliably(
                 baseUrl,
                 log.original_chat_id,
                 msgId,
-                'approved source message'
+                'approved source message',
+                '❤'
               )),
             ]);
             const rejectedResult = results.find((result) => result.status === 'rejected');
@@ -552,7 +553,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
           runCallbackSideEffects(`rejection ${logId}`, async () => {
-            const dislikeJobs = originalMsgIds.map((msgId) => reactToTelegramMessage(
+            const dislikeJobs = originalMsgIds.map((msgId) => reactToTelegramMessageReliably(
               baseUrl,
               log.original_chat_id,
               msgId,
@@ -2410,6 +2411,38 @@ async function reactToTelegramMessage(
     console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
+}
+
+async function reactToTelegramMessageReliably(
+  baseUrl: string,
+  chatId: string | number,
+  messageId: number,
+  label: string,
+  emoji: string
+): Promise<{ ok: boolean; result?: any; description?: string }> {
+  const retryDelays = [0, 15000, 45000, 90000];
+  let lastResult: { ok: boolean; result?: any; description?: string } = {
+    ok: false,
+    description: 'Reaction was not attempted',
+  };
+
+  for (let round = 0; round < retryDelays.length; round += 1) {
+    const retryDelay = retryDelays[round];
+    if (retryDelay > 0) {
+      await delay(retryDelay);
+      console.log(`[BotListener] Retrying reaction for ${label} (round ${round + 1}/${retryDelays.length}).`);
+    }
+
+    lastResult = await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
+    if (lastResult.ok) {
+      return lastResult;
+    }
+  }
+
+  emitListenerLog('error', `Không thể đặt reaction ${emoji} cho ${label} sau ${retryDelays.length} đợt thử.`, {
+    step: 'reaction',
+  });
+  return lastResult;
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
