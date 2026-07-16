@@ -575,6 +575,17 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       );
       if (sourceReplyLogRes.rows.length === 0) return false;
 
+      // Material requests use replies to the original source message as the
+      // acceptance signal. Once that flow is ready for, or has completed,
+      // acceptance, let the delivery-reply handler below own the reply instead
+      // of superseding it and creating a brand-new approval request.
+      const belongsToAcceptanceFlow = sourceReplyLogRes.rows.some((log: any) =>
+        log.status === 'supply_agreed' || log.status === 'completed'
+      );
+      if (belongsToAcceptanceFlow) {
+        return false;
+      }
+
       for (const log of sourceReplyLogRes.rows) {
         const autoSetup = await loadAutomationSetup(log.automation_id);
         if (!autoSetup) continue;
