@@ -491,21 +491,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             : [];
           await updateCallbackStatus(`✅ ${approvalDecisionText || 'Đã đồng ý'}`, 'callback approval immediate');
           runCallbackSideEffects(`approval ${logId}`, async () => {
-            const results = await Promise.allSettled([
-              appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`),
-              ...originalMsgIds.map((msgId) => reactToTelegramMessageReliably(
-                baseUrl,
-                log.original_chat_id,
-                msgId,
-                'approved source message',
-                '❤'
-              )),
-            ]);
-            const rejectedResult = results.find((result) => result.status === 'rejected');
-            if (rejectedResult?.status === 'rejected') {
-              throw rejectedResult.reason;
-            }
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
           });
+          queueTelegramReactions(baseUrl, log.original_chat_id, originalMsgIds, 'approved source message', '❤');
           return;
 
         } else if (action === 'appr_disagree') {
@@ -553,16 +541,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
           runCallbackSideEffects(`rejection ${logId}`, async () => {
-            const dislikeJobs = originalMsgIds.map((msgId) => reactToTelegramMessageReliably(
-              baseUrl,
-              log.original_chat_id,
-              msgId,
-              'rejected source message',
-              '👎'
-            ));
-
             const results = await Promise.allSettled([
-              ...dislikeJobs,
               sendTelegramMessageWithFallback(baseUrl, {
                 chat_id: rejectTarget.groupId,
                 message_thread_id: rejectTarget.threadId || undefined,
@@ -575,6 +554,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               throw rejectedResult.reason;
             }
           });
+          queueTelegramReactions(baseUrl, log.original_chat_id, originalMsgIds, 'rejected source message', '👎');
 
         }
       } finally {
@@ -2413,36 +2393,23 @@ async function reactToTelegramMessage(
   return result;
 }
 
-async function reactToTelegramMessageReliably(
+function queueTelegramReactions(
   baseUrl: string,
   chatId: string | number,
-  messageId: number,
+  messageIds: number[],
   label: string,
   emoji: string
-): Promise<{ ok: boolean; result?: any; description?: string }> {
-  const retryDelays = [0, 15000, 45000, 90000];
-  let lastResult: { ok: boolean; result?: any; description?: string } = {
-    ok: false,
-    description: 'Reaction was not attempted',
-  };
-
-  for (let round = 0; round < retryDelays.length; round += 1) {
-    const retryDelay = retryDelays[round];
-    if (retryDelay > 0) {
-      await delay(retryDelay);
-      console.log(`[BotListener] Retrying reaction for ${label} (round ${round + 1}/${retryDelays.length}).`);
+): void {
+  // Reaction is cosmetic feedback. Keep it completely detached from workflow
+  // state changes and notifications so Telegram reaction failures can never
+  // delay or fail the main workflow.
+  void (async () => {
+    for (const messageId of messageIds) {
+      await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
     }
-
-    lastResult = await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
-    if (lastResult.ok) {
-      return lastResult;
-    }
-  }
-
-  emitListenerLog('error', `Không thể đặt reaction ${emoji} cho ${label} sau ${retryDelays.length} đợt thử.`, {
-    step: 'reaction',
+  })().catch((error: any) => {
+    console.warn(`[BotListener] Detached reaction job failed (${label}, non-fatal): ${error?.message || error}`);
   });
-  return lastResult;
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
