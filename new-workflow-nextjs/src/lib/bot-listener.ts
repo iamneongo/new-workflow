@@ -2457,10 +2457,22 @@ function queueTelegramReactions(
 ): void {
   // Reaction is cosmetic feedback. Keep it completely detached from workflow
   // state changes and notifications so Telegram reaction failures can never
-  // delay or fail the main workflow.
+  // delay or fail the main workflow. Telegram connectivity on the VPS can be
+  // intermittent, so retry again later instead of exhausting every attempt
+  // within a few seconds of the approval callback.
   void (async () => {
     for (const messageId of messageIds) {
-      await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
+      const retryDelays = [0, 15_000, 45_000, 90_000];
+      for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+        if (retryDelays[attempt] > 0) {
+          await delay(retryDelays[attempt]);
+        }
+        const result = await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
+        if (result.ok) break;
+        if (attempt < retryDelays.length - 1) {
+          console.warn(`[BotListener] Scheduling detached reaction retry ${attempt + 2}/${retryDelays.length} for ${label}.`);
+        }
+      }
     }
   })().catch((error: any) => {
     console.warn(`[BotListener] Detached reaction job failed (${label}, non-fatal): ${error?.message || error}`);
