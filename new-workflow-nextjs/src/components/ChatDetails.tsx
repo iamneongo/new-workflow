@@ -108,8 +108,6 @@ export default function ChatDetails({
   const [isSupplyConfigDrawerOpen, setIsSupplyConfigDrawerOpen] = useState(false);
   const [isSupplyChangeDrawerOpen, setIsSupplyChangeDrawerOpen] = useState(false);
 
-  const [deliveryGroupIdInput, setDeliveryGroupIdInput] = useState('');
-  const [deliveryThreadIdInput, setDeliveryThreadIdInput] = useState<number | ''>('');
   const [finalMessageModeInput, setFinalMessageModeInput] = useState<FinalMessageMode>('forward');
   const [isFinalConfigDrawerOpen, setIsFinalConfigDrawerOpen] = useState(false);
 
@@ -264,8 +262,6 @@ export default function ChatDetails({
       setSupplyChangeThreadIdInput(automation.supplyChangeThreadId !== null && automation.supplyChangeThreadId !== undefined ? automation.supplyChangeThreadId : '');
       setSupplyChangeMessageModeInput(automation.supplyChangeMessageMode || 'forward');
 
-      setDeliveryGroupIdInput(automation.deliveryGroupId || '');
-      setDeliveryThreadIdInput(automation.deliveryThreadId !== null && automation.deliveryThreadId !== undefined ? automation.deliveryThreadId : '');
       setFinalMessageModeInput(automation.finalMessageMode || 'forward');
 
       setFinalGroupIdInput(automation.finalGroupId || '');
@@ -474,10 +470,6 @@ export default function ChatDetails({
         updates.supplyChangeGroupId = supplyChangeGroupIdInput;
         updates.supplyChangeThreadId = supplyChangeThreadIdInput === '' ? null : Number(supplyChangeThreadIdInput);
         updates.supplyChangeMessageMode = supplyChangeMessageModeInput;
-      }
-      if (field === 'delivery') {
-        updates.deliveryGroupId = deliveryGroupIdInput;
-        updates.deliveryThreadId = deliveryThreadIdInput === '' ? null : Number(deliveryThreadIdInput);
       }
       if (field === 'final') {
         updates.finalGroupId = finalGroupIdInput;
@@ -1788,7 +1780,6 @@ export default function ChatDetails({
     if (field === 'approval') return !automation.approvalGroupId;
     if (field === 'supply') return !automation.supplyListenGroupId;
     if (field === 'supplyChange') return !automation.supplyChangeGroupId;
-    if (field === 'delivery') return !automation.deliveryGroupId;
     if (field === 'final') return !automation.finalGroupId;
     if (field === 'reject') return !automation.rejectGroupId;
     return false;
@@ -2837,51 +2828,9 @@ export default function ChatDetails({
                       </div>
                     </div>
 
-                    {/* Sub-branch Right: sau khi duyệt vật tư → giao nhận & nghiệm thu */}
+                    {/* Sub-branch Right: sau khi duyệt vật tư → nghiệm thu */}
                     <div className="workflow-branch branch-right">
-                      {/* ── NODE 4: DELIVERY GROUP CONFIG ── */}
-                      <div 
-                        id="tour-node-delivery"
-                        className={`workflow-node action-node interactive-node${editCard === 'delivery' ? ' editing' : ''}${isCardUnconfigured('delivery') ? ' unconfigured' : ''}`}
-                        onClick={() => { if (editCard !== 'delivery') setEditCard('delivery'); }}
-                      >
-                        <div className="node-icon">📦</div>
-                        <div className="node-content">
-                          <span className="node-tag">Bước 4: Giao nhận</span>
-                          <h5 className="node-title">Yêu cầu phản hồi khi nhận</h5>
-                          
-                          {editCard === 'delivery' ? (
-                            <div id="tour-delivery-editor">
-                              {renderGroupTopicSelector(
-                                deliveryGroupIdInput,
-                                setDeliveryGroupIdInput,
-                                deliveryThreadIdInput,
-                                setDeliveryThreadIdInput,
-                                () => setEditCard(null),
-                                () => handleSaveCard('delivery'),
-                                undefined,
-                                { selectorId: 'delivery' }
-                              )}
-                            </div>
-                          ) : (
-                            <p className="node-text" style={{ fontWeight: '500' }}>
-                              {automation.deliveryGroupId ? (
-                                renderGroupTopicBadge(automation.deliveryGroupId, automation.deliveryThreadId)
-                              ) : (
-                                <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm giao nhận.</span>
-                              )}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="workflow-arrow-v">
-                        <svg width="2" height="30" viewBox="0 0 2 30" fill="none">
-                          <line x1="1" y1="0" x2="1" y2="30" stroke="var(--border-color)" strokeWidth="2" strokeDasharray="3 3" />
-                        </svg>
-                      </div>
-
-                      {/* ── NODE 5: CONTROL SWITCH & STATS & FINAL GROUP ── */}
+                      {/* ── NODE 4: CONTROL SWITCH & STATS & FINAL GROUP ── */}
                       <div 
                         id="tour-node-final"
                         className={`workflow-node success-node interactive-node${editCard === 'final' ? ' editing' : ''}${isCardUnconfigured('final') ? ' unconfigured' : ''}`}
@@ -2892,7 +2841,7 @@ export default function ChatDetails({
                       >
                         <div className="node-icon">{listenerActive ? '⚡' : '✅'}</div>
                         <div className="node-content" style={{ width: '100%' }}>
-                          <span className="node-tag">Bước 5: Nghiệm thu</span>
+                          <span className="node-tag">Bước 4: Nghiệm thu</span>
                           <h5 className="node-title">Nghiệm thu vật tư &amp; Gửi tiếp</h5>
                           
                           {editCard === 'final' ? (
