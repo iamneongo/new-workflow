@@ -396,12 +396,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackQueryId = cq.id;
       const userFullName = [cq.from.first_name, cq.from.last_name].filter(Boolean).join(' ') || cq.from.username || 'Thành viên';
 
-      // Answer immediately
-      await fetch(`${baseUrl}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: callbackQueryId }),
-      });
+      // Stop Telegram's loading spinner quickly. Network trouble here must not
+      // hold the approval decision open indefinitely.
+      await answerTelegramCallback(baseUrl, callbackQueryId, 'Đang xử lý lựa chọn...');
 
       const parts = data.split(':');
       if (parts.length < 2) return;
@@ -433,10 +430,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       };
       callbackFailureReporter = updateCallbackStatus;
       try {
-        if (callbackChatId && callbackMessageId) {
-          await updateCallbackStatus('⏳ Đang xử lý lựa chọn...', 'callback ack');
-        }
-
         const logRes = await p.query('SELECT * FROM workflow_logs WHERE id = $1', [logId]);
         if (logRes.rows.length === 0) {
           await updateCallbackStatus('❌ Không tìm thấy workflow log để xử lý.', 'callback missing log');
@@ -485,7 +478,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               step: 'approval',
             });
           }
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+          runCallbackSideEffects(`approval ${logId}`, async () => {
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+          });
           return;
 
         } else if (action === 'appr_disagree') {
@@ -494,25 +489,18 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             return;
           }
 
-          await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
+          const apprRejectClaim = await p.query(
+            "UPDATE workflow_logs SET status = 'rejected' WHERE id = $1 AND status = 'pending' RETURNING id",
+            [logId]
+          );
+          if (apprRejectClaim.rows.length === 0) {
+            return;
+          }
           const sourceThreadId = normalizeThreadId(log.original_thread_id);
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, sourceThreadId);
           const rejectTopicConfig = resolveRejectTopicConfig(autoSetup, sourceThreadId);
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
           const headerText = buildApprovalHeaderText(autoSetup, log);
-
-          // Delete original source message(s) so other group members can't see it
-          if (log.original_chat_id) {
-            const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
-              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
-              : [Number(log.original_msg_id)];
-            for (const msgId of originalMsgIds) {
-              await deleteTelegramMessage(baseUrl, {
-                chat_id: log.original_chat_id,
-                message_id: msgId,
-              }, 'rejected source message');
-            }
-          }
 
           // Send reject notification
           const rejectTarget = resolveApprovalRejectTarget(autoSetup);
@@ -533,13 +521,32 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             log.original_sender_name || '',
             log.original_text || ''
           );
-          await sendDividerMessageIfNeeded(baseUrl, rejectTarget.groupId, rejectTarget.threadId || undefined, 'reject notice');
-          await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: rejectTarget.groupId,
-            message_thread_id: rejectTarget.threadId || undefined,
-            text: rejectText,
-          }, 'reject notice');
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`);
+          const originalMsgIds: number[] = log.original_chat_id
+            ? (typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+              : [Number(log.original_msg_id)].filter(Boolean))
+            : [];
+
+          runCallbackSideEffects(`rejection ${logId}`, async () => {
+            const deleteJobs = originalMsgIds.map((msgId) => deleteTelegramMessage(baseUrl, {
+              chat_id: log.original_chat_id,
+              message_id: msgId,
+            }, 'rejected source message'));
+
+            const results = await Promise.allSettled([
+              ...deleteJobs,
+              sendTelegramMessageWithFallback(baseUrl, {
+                chat_id: rejectTarget.groupId,
+                message_thread_id: rejectTarget.threadId || undefined,
+                text: rejectText,
+              }, 'reject notice'),
+              appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`),
+            ]);
+            const rejectedResult = results.find((result) => result.status === 'rejected');
+            if (rejectedResult?.status === 'rejected') {
+              throw rejectedResult.reason;
+            }
+          });
 
         }
       } finally {
@@ -2063,6 +2070,39 @@ function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function answerTelegramCallback(baseUrl: string, callbackQueryId: string, text: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    await fetch(`${baseUrl}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    const message = error?.name === 'AbortError'
+      ? 'request timeout after 3s'
+      : (error?.message || String(error));
+    console.warn(`[BotListener] Telegram answerCallbackQuery failed (non-fatal): ${message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function runCallbackSideEffects(label: string, task: () => Promise<void>): void {
+  void task().catch((error: any) => {
+    console.error(`[BotListener] Background callback side effects failed (${label}):`, error?.message || error);
+    emitListenerLog('error', `Tác vụ nền sau lựa chọn lỗi (${label}): ${error?.message || error}`, {
+      step: 'callback-background',
+    });
+  });
+}
 
 async function sendTelegramJson(
   baseUrl: string,
