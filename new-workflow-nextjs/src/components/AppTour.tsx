@@ -246,18 +246,9 @@ export default function AppTour({
       },
     });
 
-    pushStep(steps, '#tour-node-delivery', {
-      popover: {
-        title: 'Bước 4: Báo đã nhận vật tư',
-        description: 'Bước này gửi tin báo hàng đang về và chờ người ở công trình reply lại khi đã nhận.',
-        side: 'right',
-        align: 'start',
-      },
-    });
-
     pushStep(steps, '#tour-node-final', {
       popover: {
-        title: 'Bước 5: Chốt nghiệm thu',
+        title: 'Bước 4: Chốt nghiệm thu',
         description: 'Đây là bước cuối. Bot sẽ gửi phần xác nhận nghiệm thu sang nơi bạn đã chọn.',
         side: 'right',
         align: 'start',
@@ -282,23 +273,7 @@ export default function AppTour({
       pushStep(steps, '#tour-source-editor', {
         popover: {
           title: 'Cách dùng node nguồn',
-          description: 'Bạn chọn nhóm trước, rồi chọn topic nếu cần. Nếu để trống phần topic, bot sẽ nghe toàn bộ nhóm. Phần nâng cao bên dưới giúp bot chỉ nhận những tin đúng mẫu như CT, Buổi, HM.',
-          side: 'top',
-          align: 'start',
-        },
-      });
-      pushStep(steps, '#tour-source-recognition-enabled', {
-        popover: {
-          title: 'Bật lọc tin đúng mẫu',
-          description: 'Bạn bật mục này khi chỉ muốn bot nhận những tin đúng mẫu của đội mình. Cách này giúp bot bớt nghe nhầm các tin trò chuyện thông thường.',
-          side: 'top',
-          align: 'start',
-        },
-      });
-      pushStep(steps, '#tour-source-recognition-keywords', {
-        popover: {
-          title: 'Nhập dấu hiệu nhận dạng',
-          description: 'Bạn nhập các chữ mà tin bắt buộc phải có, ví dụ CT, Buổi, HM. Khi một tin thiếu một trong các chữ này, bot sẽ bỏ qua.',
+          description: 'Bạn chọn nhóm trước, rồi chọn topic nếu cần. Nếu để trống phần topic, bot sẽ nghe toàn bộ nhóm.',
           side: 'top',
           align: 'start',
         },
@@ -496,29 +471,10 @@ export default function AppTour({
       });
     }
 
-    if (node === 'delivery') {
-      pushStep(steps, '#tour-node-delivery', {
-        popover: {
-          title: 'Bước 4: Báo đã nhận vật tư',
-          description: 'Bước này dùng lúc hàng đã về công trình. Bot sẽ gửi một tin báo nhận hàng và chờ người dùng reply lại ngay trên tin đó.',
-          side: 'right',
-          align: 'start',
-        },
-      });
-      pushStep(steps, '#tour-delivery-editor', {
-        popover: {
-          title: 'Cách dùng node giao nhận',
-          description: 'Bạn chọn nơi sẽ nhận tin báo giao hàng. Chọn đúng topic sẽ giúp bot hiểu reply đó thuộc công trình nào.',
-          side: 'top',
-          align: 'start',
-        },
-      });
-    }
-
     if (node === 'final') {
       pushStep(steps, '#tour-node-final', {
         popover: {
-          title: 'Bước 5: Chốt nghiệm thu',
+          title: 'Bước 4: Chốt nghiệm thu',
           description: 'Đây là bước chốt cuối của quy trình. Khi có reply nghiệm thu, bot sẽ gửi tiếp sang nơi bạn đã chọn.',
           side: 'right',
           align: 'start',

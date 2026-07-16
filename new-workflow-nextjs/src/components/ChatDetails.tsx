@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, FinalMessageMode, SupplyChangeMessageMode, ApprovalTopicConfig, RejectTopicConfig } from '@/lib/automation-types';
-import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_REJECT_CUSTOM_MESSAGE, DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG } from '@/lib/automation-types';
+import type { ChatEntry, AutomationSetup, TopicEntry, ApprovalMessageMode, SupplierRoute, SupplierRouteMode, SupplyChangeMessageMode, ApprovalTopicConfig, RejectTopicConfig } from '@/lib/automation-types';
+import { DEFAULT_APPROVAL_CUSTOM_MESSAGE, DEFAULT_APPROVAL_ACTION_CONFIG, DEFAULT_REJECT_CUSTOM_MESSAGE } from '@/lib/automation-types';
 
 type WorkflowNodeKey = 'source' | 'approval' | 'reject' | 'supply' | 'supplyChange' | 'delivery' | 'final';
 
@@ -43,15 +43,6 @@ function formatTime(ts: number | null): string {
     + ' ' + d.toLocaleDateString('vi-VN');
 }
 
-function parseRecognitionKeywords(value: string): string[] {
-  const keywords = value
-    .split(/[\n,;|]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return Array.from(new Set(keywords));
-}
-
 export default function ChatDetails({
   automation: automationProp,
   onDeleteAutomation,
@@ -87,10 +78,6 @@ export default function ChatDetails({
   
   const [sourceGroupIdInput, setSourceGroupIdInput] = useState('');
   const [sourceThreadIdsInput, setSourceThreadIdsInput] = useState<number[]>([]);
-  const [sourceMessageRecognitionEnabledInput, setSourceMessageRecognitionEnabledInput] = useState(DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.enabled);
-  const [sourceMessageRecognitionKeywordsInput, setSourceMessageRecognitionKeywordsInput] = useState(
-    DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords.join(', ')
-  );
 
   const [approvalGroupIdInput, setApprovalGroupIdInput] = useState('');
   const [approvalThreadIdInput, setApprovalThreadIdInput] = useState<number | ''>('');
@@ -100,10 +87,6 @@ export default function ChatDetails({
   const [approvalDisagreeButtonLabelInput, setApprovalDisagreeButtonLabelInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
   const [approvalAgreeResultMessageInput, setApprovalAgreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
   const [approvalDisagreeResultMessageInput, setApprovalDisagreeResultMessageInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
-  const [approvalHideAfterActionInput, setApprovalHideAfterActionInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction);
-  const [approvalRefreshOnSourceReplyInput, setApprovalRefreshOnSourceReplyInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply);
-  const [approvalDeleteSourceMessageOnReplyInput, setApprovalDeleteSourceMessageOnReplyInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply);
-  const [approvalAttendanceSupplementReplyEnabledInput, setApprovalAttendanceSupplementReplyEnabledInput] = useState(DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled);
   const [approvalTopicConfigsInput, setApprovalTopicConfigsInput] = useState<ApprovalTopicConfig[]>([]);
   const [isApprovalMessageDrawerOpen, setIsApprovalMessageDrawerOpen] = useState(false);
   const [isApprovalTopicDrawerOpen, setIsApprovalTopicDrawerOpen] = useState(false);
@@ -120,11 +103,6 @@ export default function ChatDetails({
   const [supplyChangeMessageModeInput, setSupplyChangeMessageModeInput] = useState<SupplyChangeMessageMode>('forward');
   const [isSupplyConfigDrawerOpen, setIsSupplyConfigDrawerOpen] = useState(false);
   const [isSupplyChangeDrawerOpen, setIsSupplyChangeDrawerOpen] = useState(false);
-
-  const [deliveryGroupIdInput, setDeliveryGroupIdInput] = useState('');
-  const [deliveryThreadIdInput, setDeliveryThreadIdInput] = useState<number | ''>('');
-  const [finalMessageModeInput, setFinalMessageModeInput] = useState<FinalMessageMode>('forward');
-  const [isFinalConfigDrawerOpen, setIsFinalConfigDrawerOpen] = useState(false);
 
   const [finalGroupIdInput, setFinalGroupIdInput] = useState('');
   const [finalThreadIdInput, setFinalThreadIdInput] = useState<number | ''>('');
@@ -165,9 +143,6 @@ export default function ChatDetails({
     if (editCard !== 'supplyChange') {
       setIsSupplyChangeDrawerOpen(false);
     }
-    if (editCard !== 'final') {
-      setIsFinalConfigDrawerOpen(false);
-    }
     if (editCard !== 'reject') {
       setIsRejectConfigDrawerOpen(false);
     }
@@ -193,7 +168,6 @@ export default function ChatDetails({
       || isApprovalTopicDrawerOpen
       || isSupplyConfigDrawerOpen
       || isSupplyChangeDrawerOpen
-      || isFinalConfigDrawerOpen
       || isRejectConfigDrawerOpen
     );
     if (!hasOpenDrawer) return;
@@ -204,7 +178,6 @@ export default function ChatDetails({
         setIsApprovalTopicDrawerOpen(false);
         setIsSupplyConfigDrawerOpen(false);
         setIsSupplyChangeDrawerOpen(false);
-        setIsFinalConfigDrawerOpen(false);
         setIsRejectConfigDrawerOpen(false);
       }
     };
@@ -216,7 +189,6 @@ export default function ChatDetails({
     isApprovalTopicDrawerOpen,
     isSupplyConfigDrawerOpen,
     isSupplyChangeDrawerOpen,
-    isFinalConfigDrawerOpen,
     isRejectConfigDrawerOpen,
   ]);
 
@@ -233,12 +205,6 @@ export default function ChatDetails({
         : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
           ? [automation.sourceThreadId]
           : []);
-      setSourceMessageRecognitionEnabledInput(automation.sourceMessageRecognitionConfig?.enabled !== false);
-      setSourceMessageRecognitionKeywordsInput(
-        Array.isArray(automation.sourceMessageRecognitionConfig?.requiredKeywords) && automation.sourceMessageRecognitionConfig.requiredKeywords.length > 0
-          ? automation.sourceMessageRecognitionConfig.requiredKeywords.join(', ')
-          : DEFAULT_SOURCE_MESSAGE_RECOGNITION_CONFIG.requiredKeywords.join(', ')
-      );
 
       setApprovalGroupIdInput(automation.approvalGroupId || '');
       setApprovalThreadIdInput(automation.approvalThreadId !== null && automation.approvalThreadId !== undefined ? automation.approvalThreadId : '');
@@ -248,10 +214,6 @@ export default function ChatDetails({
       setApprovalDisagreeButtonLabelInput(automation.approvalActionConfig?.disagreeButtonLabel || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel);
       setApprovalAgreeResultMessageInput(automation.approvalActionConfig?.agreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage);
       setApprovalDisagreeResultMessageInput(automation.approvalActionConfig?.disagreeResultMessage || DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage);
-      setApprovalHideAfterActionInput(automation.approvalActionConfig?.hideAfterAction === true);
-      setApprovalRefreshOnSourceReplyInput(automation.approvalActionConfig?.refreshOnSourceReply === true);
-      setApprovalDeleteSourceMessageOnReplyInput(automation.approvalActionConfig?.deleteSourceMessageOnReply === true);
-      setApprovalAttendanceSupplementReplyEnabledInput(automation.approvalActionConfig?.attendanceSupplementReplyEnabled === true);
       const sourceThreadIds = Array.isArray(automation.sourceThreadIds) && automation.sourceThreadIds.length > 0
         ? automation.sourceThreadIds
         : automation.sourceThreadId !== null && automation.sourceThreadId !== undefined
@@ -282,10 +244,6 @@ export default function ChatDetails({
       setSupplyChangeGroupIdInput(automation.supplyChangeGroupId || '');
       setSupplyChangeThreadIdInput(automation.supplyChangeThreadId !== null && automation.supplyChangeThreadId !== undefined ? automation.supplyChangeThreadId : '');
       setSupplyChangeMessageModeInput(automation.supplyChangeMessageMode || 'forward');
-
-      setDeliveryGroupIdInput(automation.deliveryGroupId || '');
-      setDeliveryThreadIdInput(automation.deliveryThreadId !== null && automation.deliveryThreadId !== undefined ? automation.deliveryThreadId : '');
-      setFinalMessageModeInput(automation.finalMessageMode || 'forward');
 
       setFinalGroupIdInput(automation.finalGroupId || '');
       setFinalThreadIdInput(automation.finalThreadId !== null && automation.finalThreadId !== undefined ? automation.finalThreadId : '');
@@ -458,10 +416,6 @@ export default function ChatDetails({
         updates.sourceGroupId = sourceGroupIdInput;
         updates.sourceThreadIds = sourceThreadIdsInput;
         updates.sourceThreadId = sourceThreadIdsInput[0] ?? null;
-        updates.sourceMessageRecognitionConfig = {
-          enabled: sourceMessageRecognitionEnabledInput,
-          requiredKeywords: parseRecognitionKeywords(sourceMessageRecognitionKeywordsInput),
-        };
       }
       if (field === 'bot') {
         updates.botToken = tokenInput.trim();
@@ -476,36 +430,41 @@ export default function ChatDetails({
           disagreeButtonLabel: approvalDisagreeButtonLabelInput,
           agreeResultMessage: approvalAgreeResultMessageInput,
           disagreeResultMessage: approvalDisagreeResultMessageInput,
-          hideAfterAction: approvalHideAfterActionInput,
-          refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
-          deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
-          attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
+          hideAfterAction: DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction,
+          refreshOnSourceReply: DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply,
+          deleteSourceMessageOnReply: DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply,
+          attendanceSupplementReplyEnabled: DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled,
         };
-        updates.approvalTopicConfigs = approvalTopicConfigsInput;
+        updates.approvalTopicConfigs = approvalTopicConfigsInput.map((config) => ({
+          ...config,
+          approvalActionConfig: {
+            ...config.approvalActionConfig,
+            hideAfterAction: DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction,
+            refreshOnSourceReply: DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply,
+            deleteSourceMessageOnReply: DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply,
+            attendanceSupplementReplyEnabled: DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled,
+          },
+        }));
       }
       if (field === 'supply') {
-        updates.supplyGroupId = supplyGroupIdInput;
-        updates.supplyThreadId = supplyThreadIdInput === '' ? null : Number(supplyThreadIdInput);
-        updates.supplierSelectionHideAfterAction = supplierSelectionHideAfterActionInput;
-        updates.supplyPromptHideAfterAction = supplyPromptHideAfterActionInput;
+        updates.supplyGroupId = '';
+        updates.supplyThreadId = null;
+        updates.supplierSelectionHideAfterAction = false;
+        updates.supplyPromptHideAfterAction = false;
         updates.supplyListenGroupId = supplyListenGroupIdInput;
         updates.supplyListenThreadIds = supplyListenThreadIdsInput;
         updates.supplyListenThreadId = supplyListenThreadIdsInput[0] ?? null;
-        updates.supplierRoutes = supplierRoutesInput;
+        updates.supplierRoutes = [];
       }
       if (field === 'supplyChange') {
         updates.supplyChangeGroupId = supplyChangeGroupIdInput;
         updates.supplyChangeThreadId = supplyChangeThreadIdInput === '' ? null : Number(supplyChangeThreadIdInput);
         updates.supplyChangeMessageMode = supplyChangeMessageModeInput;
       }
-      if (field === 'delivery') {
-        updates.deliveryGroupId = deliveryGroupIdInput;
-        updates.deliveryThreadId = deliveryThreadIdInput === '' ? null : Number(deliveryThreadIdInput);
-      }
       if (field === 'final') {
         updates.finalGroupId = finalGroupIdInput;
         updates.finalThreadId = finalThreadIdInput === '' ? null : Number(finalThreadIdInput);
-        updates.finalMessageMode = finalMessageModeInput;
+        updates.finalMessageMode = 'copy';
       }
       if (field === 'reject') {
         updates.rejectGroupId = rejectGroupIdInput;
@@ -586,10 +545,6 @@ export default function ChatDetails({
       || config.approvalActionConfig.disagreeButtonLabel !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeButtonLabel
       || config.approvalActionConfig.agreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage
       || config.approvalActionConfig.disagreeResultMessage !== DEFAULT_APPROVAL_ACTION_CONFIG.disagreeResultMessage
-      || config.approvalActionConfig.hideAfterAction !== DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction
-      || config.approvalActionConfig.refreshOnSourceReply !== DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply
-      || config.approvalActionConfig.deleteSourceMessageOnReply !== DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply
-      || config.approvalActionConfig.attendanceSupplementReplyEnabled !== DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled
     )
   )).length;
   const rejectTopicManagedCount = sourceThreadIdsInput.length;
@@ -631,10 +586,10 @@ export default function ChatDetails({
       disagreeButtonLabel: approvalDisagreeButtonLabelInput,
       agreeResultMessage: approvalAgreeResultMessageInput,
       disagreeResultMessage: approvalDisagreeResultMessageInput,
-      hideAfterAction: approvalHideAfterActionInput,
-      refreshOnSourceReply: approvalRefreshOnSourceReplyInput,
-      deleteSourceMessageOnReply: approvalDeleteSourceMessageOnReplyInput,
-      attendanceSupplementReplyEnabled: approvalAttendanceSupplementReplyEnabledInput,
+      hideAfterAction: DEFAULT_APPROVAL_ACTION_CONFIG.hideAfterAction,
+      refreshOnSourceReply: DEFAULT_APPROVAL_ACTION_CONFIG.refreshOnSourceReply,
+      deleteSourceMessageOnReply: DEFAULT_APPROVAL_ACTION_CONFIG.deleteSourceMessageOnReply,
+      attendanceSupplementReplyEnabled: DEFAULT_APPROVAL_ACTION_CONFIG.attendanceSupplementReplyEnabled,
     },
   });
 
@@ -767,67 +722,6 @@ export default function ChatDetails({
             </div>
           </div>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-            <input
-              type="checkbox"
-              checked={config.approvalActionConfig.hideAfterAction === true}
-              onChange={(e) => setApprovalTopicConfig(threadId, {
-                ...config,
-                approvalActionConfig: {
-                  ...config.approvalActionConfig,
-                  hideAfterAction: e.target.checked,
-                },
-              })}
-            />
-            <span>Ẩn tin nhắn này sau khi đã bấm xử lý xong</span>
-          </label>
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-            <input
-              type="checkbox"
-              checked={config.approvalActionConfig.refreshOnSourceReply === true}
-              onChange={(e) => setApprovalTopicConfig(threadId, {
-                ...config,
-                approvalActionConfig: {
-                  ...config.approvalActionConfig,
-                  refreshOnSourceReply: e.target.checked,
-                  deleteSourceMessageOnReply: e.target.checked
-                    ? config.approvalActionConfig.deleteSourceMessageOnReply
-                    : false,
-                },
-              })}
-            />
-            <span>Khi có người trả lời bổ sung vào tin cũ, bot tạo lại 1 yêu cầu mới theo tin trả lời đó</span>
-          </label>
-          {config.approvalActionConfig.refreshOnSourceReply === true && (
-            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-              <input
-                type="checkbox"
-                checked={config.approvalActionConfig.deleteSourceMessageOnReply === true}
-                onChange={(e) => setApprovalTopicConfig(threadId, {
-                  ...config,
-                  approvalActionConfig: {
-                    ...config.approvalActionConfig,
-                    deleteSourceMessageOnReply: e.target.checked,
-                  },
-                })}
-              />
-              <span>Xóa tin chấm công cũ trong nhóm nguồn sau khi bot đã tạo yêu cầu mới</span>
-            </label>
-          )}
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-            <input
-              type="checkbox"
-              checked={config.approvalActionConfig.attendanceSupplementReplyEnabled === true}
-              onChange={(e) => setApprovalTopicConfig(threadId, {
-                ...config,
-                approvalActionConfig: {
-                  ...config.approvalActionConfig,
-                  attendanceSupplementReplyEnabled: e.target.checked,
-                },
-              })}
-            />
-            <span>Bổ sung chấm công: khi có người trả lời/sửa tin chấm công cũ, xóa thông báo đã chấm công cũ và tạo lại theo nội dung mới (độc lập với tùy chọn bổ sung tin trả lời ở trên)</span>
-          </label>
         </div>
       );
     });
@@ -906,7 +800,6 @@ export default function ChatDetails({
       (isApprovalMessageDrawerOpen && editCard === 'approval')
       || (isSupplyConfigDrawerOpen && editCard === 'supply')
       || (isSupplyChangeDrawerOpen && editCard === 'supplyChange')
-      || (isFinalConfigDrawerOpen && editCard === 'final')
       || (isRejectConfigDrawerOpen && editCard === 'reject');
 
     const effectiveFooterNote = shouldAutoSaveOnDone
@@ -934,12 +827,6 @@ export default function ChatDetails({
       if (isSupplyChangeDrawerOpen && editCard === 'supplyChange') {
         await handleSaveCard('supplyChange', { closeCard: false });
         setIsSupplyChangeDrawerOpen(false);
-        return;
-      }
-
-      if (isFinalConfigDrawerOpen && editCard === 'final') {
-        await handleSaveCard('final', { closeCard: false });
-        setIsFinalConfigDrawerOpen(false);
         return;
       }
 
@@ -1016,14 +903,6 @@ export default function ChatDetails({
             </button>
           </div>
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-          <input
-            type="checkbox"
-            checked={approvalHideAfterActionInput}
-            onChange={(e) => setApprovalHideAfterActionInput(e.target.checked)}
-          />
-          <span>Xử lý xong thì ẩn tin nhắn bước duyệt này</span>
-        </label>
       </div>
     );
   };
@@ -1104,32 +983,6 @@ export default function ChatDetails({
           {approvalAgreeResultMessageInput || DEFAULT_APPROVAL_ACTION_CONFIG.agreeResultMessage}
         </div>
       </div>
-      <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Nếu người gửi trả lời bổ sung vào tin cũ</div>
-        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-          <input
-            type="checkbox"
-            checked={approvalRefreshOnSourceReplyInput}
-            onChange={(e) => {
-              setApprovalRefreshOnSourceReplyInput(e.target.checked);
-              if (!e.target.checked) {
-                setApprovalDeleteSourceMessageOnReplyInput(false);
-              }
-            }}
-          />
-          <span>Nếu có người trả lời thêm vào tin cũ, bot sẽ tạo lại yêu cầu mới dựa trên tin trả lời đó</span>
-        </label>
-        {approvalRefreshOnSourceReplyInput && (
-          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-            <input
-              type="checkbox"
-              checked={approvalDeleteSourceMessageOnReplyInput}
-              onChange={(e) => setApprovalDeleteSourceMessageOnReplyInput(e.target.checked)}
-            />
-            <span>Xóa luôn tin cũ ở nhóm nguồn sau khi bot đã tạo yêu cầu mới</span>
-          </label>
-        )}
-      </div>
     </div>
   );
 
@@ -1197,25 +1050,6 @@ export default function ChatDetails({
       </div>
       <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
         Khi nhà cung ứng bấm yêu cầu đổi, bot sẽ gửi 1 tin báo vào nhóm bạn chọn. Sau đó bot sẽ chuyển tiếp các phản hồi theo cách bạn đặt ở đây.
-      </div>
-    </div>
-  );
-
-  const finalConfigPanel = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <label style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách bot gửi tin ở bước nghiệm thu</label>
-        <select
-          value={finalMessageModeInput}
-          onChange={(e) => setFinalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
-          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
-        >
-          <option value="forward">Gửi nguyên tin rồi thêm phần tổng hợp</option>
-          <option value="copy">Sao chép tin rồi thêm phần tổng hợp</option>
-        </select>
-      </div>
-      <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-        Bạn dùng phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
       </div>
     </div>
   );
@@ -1406,16 +1240,6 @@ export default function ChatDetails({
     return (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(249, 115, 22, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(249, 115, 22, 0.2)' }}>
         <span>📣</span>
-        <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{label}</span>
-      </span>
-    );
-  };
-
-  const renderFinalModeBadge = (mode: FinalMessageMode) => {
-    const label = mode === 'copy' ? 'Sao chép tin cuối' : 'Gửi nguyên tin cuối';
-    return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(168, 85, 247, 0.08)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-        <span>📦</span>
         <span style={{ color: 'var(--color-text)', fontWeight: '600', fontSize: '11px' }}>{label}</span>
       </span>
     );
@@ -1809,9 +1633,8 @@ export default function ChatDetails({
     if (field === 'source') return !automation.sourceGroupId;
     if (field === 'bot') return !automation.botToken;
     if (field === 'approval') return !automation.approvalGroupId;
-    if (field === 'supply') return !automation.supplyGroupId && (!automation.supplierRoutes || automation.supplierRoutes.length === 0);
+    if (field === 'supply') return !automation.supplyListenGroupId;
     if (field === 'supplyChange') return !automation.supplyChangeGroupId;
-    if (field === 'delivery') return !automation.deliveryGroupId;
     if (field === 'final') return !automation.finalGroupId;
     if (field === 'reject') return !automation.rejectGroupId;
     return false;
@@ -2137,39 +1960,7 @@ export default function ChatDetails({
                     (v: number | '' | number[]) => setSourceThreadIdsInput(Array.isArray(v) ? v : []),
                     () => setEditCard(null),
                     () => handleSaveCard('source'),
-                    <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nâng cao: nhận dạng tin nhắn</strong>
-                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                          Để tránh nghe nhầm, bot chỉ nhận những tin có đủ các dấu hiệu bạn nhập bên dưới. Mặc định là `CT`, `Buổi`, `HM`.
-                        </span>
-                      </div>
-
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--color-text)', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px' }}>
-                        <input
-                          id="tour-source-recognition-enabled"
-                          type="checkbox"
-                          checked={sourceMessageRecognitionEnabledInput}
-                          onChange={(e) => setSourceMessageRecognitionEnabledInput(e.target.checked)}
-                        />
-                        <span>Chỉ nghe tin đúng mẫu đã cấu hình</span>
-                      </label>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Các dấu hiệu bắt buộc</label>
-                        <textarea
-                          id="tour-source-recognition-keywords"
-                          value={sourceMessageRecognitionKeywordsInput}
-                          onChange={(e) => setSourceMessageRecognitionKeywordsInput(e.target.value)}
-                          rows={3}
-                          placeholder="CT, Buổi, HM"
-                          style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 10px', color: 'var(--color-text)', width: '100%', fontSize: '12px', resize: 'vertical', lineHeight: 1.45 }}
-                        />
-                        <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                          Mỗi dấu hiệu cách nhau bằng dấu phẩy hoặc xuống dòng. Bot sẽ chỉ nghe khi tin nhắn có đủ tất cả dấu hiệu này.
-                        </span>
-                      </div>
-                    </div>,
+                    undefined,
                     { selectorId: 'source' }
                   )}
                 </div>
@@ -2751,73 +2542,29 @@ export default function ChatDetails({
                 >
                   <div className="node-icon">📝</div>
                   <div className="node-content">
-                    <span className="node-tag">Bước 3: Lựa chọn vật tư</span>
-                    <h5 className="node-title">Hỏi phương án cung cấp</h5>
+                    <span className="node-tag">Bước 3: Nhận diện vật tư</span>
+                    <h5 className="node-title">Đánh dấu yêu cầu vật tư để nghiệm thu</h5>
                     
                     {editCard === 'supply' ? (
                       <div id="tour-supply-editor" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                          Chọn nhóm nguồn và các topic vật tư. Yêu cầu ở những topic này, sau khi được duyệt, sẽ sẵn sàng cho bước nghiệm thu.
+                        </div>
                         {renderGroupTopicSelector(
-                          supplyGroupIdInput,
-                          setSupplyGroupIdInput,
-                          supplyThreadIdInput,
-                          setSupplyThreadIdInput,
+                          supplyListenGroupIdInput,
+                          setSupplyListenGroupIdInput,
+                          supplyListenThreadIdsInput,
+                          setSupplyListenThreadIdsInput,
                           () => setEditCard(null),
                           () => handleSaveCard('supply'),
                           undefined,
-                          { selectorId: 'supply' }
+                          { selectorId: 'supply-listen', topicLabel: 'Chọn topic vật tư (để nghiệm thu):' }
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsSupplyConfigDrawerOpen(true);
-                          }}
-                          style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
-                        >
-                          Mở phần gửi tin
-                        </button>
-                        <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                            <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Nhà cung ứng và nhóm bot theo dõi</strong>
-                            <span style={{ fontSize: '10px', color: 'var(--accent-blue)', fontWeight: 600 }}>
-                              {supplierRoutesInput.length > 0 ? `${supplierRoutesInput.length} nhà cung ứng` : 'Chưa có nhà cung ứng'}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                            Bạn mở phần này để thêm nhà cung ứng, chọn cách bot gửi tin và chọn nhóm bot sẽ theo dõi ở bước 3.
-                          </div>
-                        </div>
-                        <div style={{ display: 'none' }}>
-                        <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
-                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600', marginBottom: '4px' }}>
-                            Cài đặt kênh lắng nghe
-                          </div>
-                          {renderGroupTopicSelector(
-                            supplyListenGroupIdInput,
-                            setSupplyListenGroupIdInput,
-                            supplyListenThreadIdsInput,
-                            setSupplyListenThreadIdsInput,
-                            () => setEditCard(null),
-                            () => handleSaveCard('supply'),
-                            undefined,
-                            { selectorId: 'supply-listen', topicLabel: 'Chọn topic lắng nghe:' }
-                          )}
-                        </div>
-                        </div>
                       </div>
                     ) : (
                       <div className="node-text" style={{ fontWeight: '500', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {automation.supplyGroupId ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                            <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Nhóm mặc định:</span>
-                            {renderGroupTopicBadge(automation.supplyGroupId, automation.supplyThreadId)}
-                          </div>
-                        ) : (
-                          <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm lựa chọn vật tư.</span>
-                        )}
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic lắng nghe:</span>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Kênh/Topic vật tư:</span>
                           {automation.supplyListenGroupId
                             ? renderGroupTopicBadge(
                               automation.supplyListenGroupId,
@@ -2826,12 +2573,12 @@ export default function ChatDetails({
                                 : automation.supplyListenThreadId
                             )
                             : (
-                              <span style={{ color: 'var(--color-text-muted)', fontSize: '10px' }}>Dùng mặc định theo nhóm phía trên</span>
+                              <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn topic vật tư dùng cho bước nghiệm thu.</span>
                             )}
                         </div>
 
                         <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>
-                          Nhánh lắng nghe: {automation.supplierRoutes?.length ? `${automation.supplierRoutes.length} nhà cung ứng đã cấu hình` : 'chưa có nhà cung ứng'}
+                          Sau khi duyệt, yêu cầu từ các topic này sẽ đi thẳng sang luồng giao nhận và nghiệm thu.
                         </div>
                       </div>
                     )}
@@ -2844,15 +2591,15 @@ export default function ChatDetails({
                   </svg>
                 </div>
 
-                {/* Sub-split */}
+                {/* Sub-split (đã gỡ bước nhà cung ứng — chỉ còn nhánh giao nhận/nghiệm thu) */}
                 <div className="workflow-split-container">
-                  <div className="workflow-split-line">
+                  <div className="workflow-split-line" style={{ display: 'none' }}>
                     <div className="split-horizontal-line"></div>
                   </div>
 
                   <div className="workflow-branches">
-                    {/* Sub-branch Left: Disagree/Change */}
-                    <div className="workflow-branch branch-left">
+                    {/* Sub-branch Left (đã gỡ bước nhà cung ứng — ẩn nhánh từ chối/đổi vật tư) */}
+                    <div className="workflow-branch branch-left" style={{ display: 'none' }}>
                       <span className="branch-label label-neutral">Từ chối</span>
                       <div className="workflow-arrow-v">
                         <svg width="2" height="20" viewBox="0 0 2 20" fill="none">
@@ -2936,58 +2683,9 @@ export default function ChatDetails({
                       </div>
                     </div>
 
-                    {/* Sub-branch Right: Agree Supply */}
+                    {/* Sub-branch Right: sau khi duyệt vật tư → nghiệm thu */}
                     <div className="workflow-branch branch-right">
-                      <span className="branch-label label-agree">Đồng ý cấp</span>
-                      <div className="workflow-arrow-v">
-                        <svg width="2" height="20" viewBox="0 0 2 20" fill="none">
-                          <line x1="1" y1="0" x2="1" y2="20" stroke="var(--border-color)" strokeWidth="2" />
-                        </svg>
-                      </div>
-
-                      {/* ── NODE 4: DELIVERY GROUP CONFIG ── */}
-                      <div 
-                        id="tour-node-delivery"
-                        className={`workflow-node action-node interactive-node${editCard === 'delivery' ? ' editing' : ''}${isCardUnconfigured('delivery') ? ' unconfigured' : ''}`}
-                        onClick={() => { if (editCard !== 'delivery') setEditCard('delivery'); }}
-                      >
-                        <div className="node-icon">📦</div>
-                        <div className="node-content">
-                          <span className="node-tag">Bước 4: Giao nhận</span>
-                          <h5 className="node-title">Yêu cầu phản hồi khi nhận</h5>
-                          
-                          {editCard === 'delivery' ? (
-                            <div id="tour-delivery-editor">
-                              {renderGroupTopicSelector(
-                                deliveryGroupIdInput,
-                                setDeliveryGroupIdInput,
-                                deliveryThreadIdInput,
-                                setDeliveryThreadIdInput,
-                                () => setEditCard(null),
-                                () => handleSaveCard('delivery'),
-                                undefined,
-                                { selectorId: 'delivery' }
-                              )}
-                            </div>
-                          ) : (
-                            <p className="node-text" style={{ fontWeight: '500' }}>
-                              {automation.deliveryGroupId ? (
-                                renderGroupTopicBadge(automation.deliveryGroupId, automation.deliveryThreadId)
-                              ) : (
-                                <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để chọn nhóm giao nhận.</span>
-                              )}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="workflow-arrow-v">
-                        <svg width="2" height="30" viewBox="0 0 2 30" fill="none">
-                          <line x1="1" y1="0" x2="1" y2="30" stroke="var(--border-color)" strokeWidth="2" strokeDasharray="3 3" />
-                        </svg>
-                      </div>
-
-                      {/* ── NODE 5: CONTROL SWITCH & STATS & FINAL GROUP ── */}
+                      {/* ── NODE 4: CONTROL SWITCH & STATS & FINAL GROUP ── */}
                       <div 
                         id="tour-node-final"
                         className={`workflow-node success-node interactive-node${editCard === 'final' ? ' editing' : ''}${isCardUnconfigured('final') ? ' unconfigured' : ''}`}
@@ -2998,7 +2696,7 @@ export default function ChatDetails({
                       >
                         <div className="node-icon">{listenerActive ? '⚡' : '✅'}</div>
                         <div className="node-content" style={{ width: '100%' }}>
-                          <span className="node-tag">Bước 5: Nghiệm thu</span>
+                          <span className="node-tag">Bước 4: Nghiệm thu</span>
                           <h5 className="node-title">Nghiệm thu vật tư &amp; Gửi tiếp</h5>
                           
                           {editCard === 'final' ? (
@@ -3010,37 +2708,7 @@ export default function ChatDetails({
                                 setFinalThreadIdInput,
                                 () => setEditCard(null),
                                 () => handleSaveCard('final'),
-                                <div id="tour-final-extra-controls" style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setIsFinalConfigDrawerOpen(true);
-                                    }}
-                                    style={{ alignSelf: 'flex-start', padding: '6px 10px', fontSize: '10px', borderRadius: '999px' }}
-                                  >
-                                    Mở phần gửi tin
-                                  </button>
-                                  <div style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                    <strong style={{ fontSize: '12px', color: 'var(--color-text)' }}>Tin nhắn bước nghiệm thu</strong>
-                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
-                                      Bạn mở phần này để chọn cách bot gửi tin cuối sang nhóm nghiệm thu.
-                                    </div>
-                                  </div>
-                                  <div style={{ display: 'none' }}>
-                                  <label style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: '600' }}>Cách gửi phản hồi cuối:</label>
-                                  <select
-                                    id="tour-final-message-mode"
-                                    value={finalMessageModeInput}
-                                    onChange={(e) => setFinalMessageModeInput(e.target.value === 'copy' ? 'copy' : 'forward')}
-                                    style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '6px', color: 'var(--color-text)', width: '100%', fontSize: '12px' }}
-                                  >
-                                    <option value="forward">Gửi nguyên tin + lời nhắn tổng hợp</option>
-                                    <option value="copy">Sao chép tin + lời nhắn tổng hợp</option>
-                                  </select>
-                                  </div>
-                                </div>,
+                                undefined,
                                 { selectorId: 'final' }
                               )}
                             </div>
@@ -3051,9 +2719,6 @@ export default function ChatDetails({
                                   renderGroupTopicBadge(automation.finalGroupId, automation.finalThreadId)
                                 ) : (
                                   <span style={{ color: '#f59e0b' }}>⚠️ Nhấp để cấu hình nhóm nghiệm thu.</span>
-                                )}
-                                {automation.finalMessageMode && (
-                                  <span style={{ marginLeft: '6px' }}>{renderFinalModeBadge(automation.finalMessageMode)}</span>
                                 )}
                               </div>
 
@@ -3110,15 +2775,6 @@ export default function ChatDetails({
         'Bạn chọn cách bot gửi lại phản hồi đổi vật tư.',
         () => setIsSupplyChangeDrawerOpen(false),
         supplyChangeConfigPanel,
-        'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
-      )}
-
-      {renderDrawerShell(
-        isFinalConfigDrawerOpen && editCard === 'final',
-        'Tin nhắn bước nghiệm thu',
-        'Bạn chọn cách bot gửi tin cuối sang nhóm nghiệm thu.',
-        () => setIsFinalConfigDrawerOpen(false),
-        finalConfigPanel,
         'Bấm Xong là hệ thống sẽ lưu ngay phần này.'
       )}
 

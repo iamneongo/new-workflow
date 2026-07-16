@@ -180,30 +180,11 @@ export default function WorkflowDiagram() {
                       </svg>
                     </div>
 
-                    {/* Node 4: Send Notification & Await Reply */}
-                    <div className="workflow-node action-node">
-                      <div className="node-icon">📦</div>
-                      <div className="node-content">
-                        <span className="node-tag">Bước 4: Giao nhận</span>
-                        <h5 className="node-title">Yêu cầu phản hồi khi nhận</h5>
-                        <p className="node-text">
-                          Thông báo vật tư đang đến và yêu cầu: <strong>"Khi vật tư đến hãy reply vào tin nhắn này"</strong>.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Down Arrow */}
-                    <div className="workflow-arrow-v">
-                      <svg width="2" height="30" viewBox="0 0 2 30" fill="none">
-                        <line x1="1" y1="0" x2="1" y2="30" stroke="var(--border-color)" strokeWidth="2" strokeDasharray="3 3" />
-                      </svg>
-                    </div>
-
-                    {/* Node 5: User Replies -> Inspected */}
+                    {/* Node 4: User Replies -> Inspected */}
                     <div className="workflow-node success-node">
                       <div className="node-icon">✅</div>
                       <div className="node-content">
-                        <span className="node-tag">Bước 5: Nghiệm thu</span>
+                        <span className="node-tag">Bước 4: Nghiệm thu</span>
                         <h5 className="node-title">Nghiệm thu vật tư hoàn tất</h5>
                         <p className="node-text">
                           Khi có phản hồi (reply), hệ thống tự động thông báo đã nghiệm thu vật tư vào group chat hoặc topic cấu hình.

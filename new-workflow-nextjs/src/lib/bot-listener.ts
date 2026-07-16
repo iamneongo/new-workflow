@@ -334,7 +334,7 @@ async function pollUpdates() {
   }
 }
 
-async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
+async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[], forcedAlbumMessages?: any[]) {
   // Dedup: skip if this update_id has already been processed (prevents polling retry duplicates).
   // Skipped for the synthetic re-dispatch of a buffered reply album (forcedAlbumMsgIds set below).
   const updateId: number = update.update_id;
@@ -371,7 +371,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         const sortedUpdates = buf.updates.sort((a: any, b: any) => Number(a.message.message_id) - Number(b.message.message_id));
         const representative = sortedUpdates.find((u: any) => u.message.text || u.message.caption) || sortedUpdates[0];
         const allIds = sortedUpdates.map((u: any) => Number(u.message.message_id));
-        void handleBotUpdate(representative, allIds).catch((err: any) => {
+        void handleBotUpdate(representative, allIds, sortedUpdates.map((item: any) => item.message)).catch((err: any) => {
           console.error('[BotListener] Unhandled buffered reply album error:', err?.message || err);
         });
       }, 3000);
@@ -396,18 +396,22 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackQueryId = cq.id;
       const userFullName = [cq.from.first_name, cq.from.last_name].filter(Boolean).join(' ') || cq.from.username || 'Thành viên';
 
-      // Answer immediately
-      await fetch(`${baseUrl}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: callbackQueryId }),
-      });
-
       const parts = data.split(':');
-      if (parts.length < 2) return;
+      if (parts.length < 2) {
+        void answerTelegramCallback(baseUrl, callbackQueryId, 'Lựa chọn không hợp lệ.');
+        return;
+      }
       const action = parts[0];
       const logId = Number(parts[1]);
-      const actionKey = `${logId}:${action}`;
+      const actionLabel = action === 'appr_agree' ? 'Đồng ý' : action === 'appr_disagree' ? 'Không đồng ý' : 'lựa chọn';
+
+      // Answer in parallel so Telegram's spinner and toast don't wait for any
+      // database or message-edit work below.
+      void answerTelegramCallback(baseUrl, callbackQueryId, `Đã nhận: ${actionLabel}`);
+
+      // Agree and disagree belong to the same decision. A second tap on either
+      // button must not start another handler while the first is still active.
+      const actionKey = `${logId}:approval-decision`;
       if (global.__processingCallbackActions!.has(actionKey)) {
         return;
       }
@@ -422,9 +426,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       const callbackCardIsMedia = Boolean(cq.message?.photo || cq.message?.document || cq.message?.video);
       const updateCallbackStatus = async (bodyText: string, label: string) => {
         if (!callbackChatId || !callbackMessageId) return;
-        const editFn = callbackCardIsMedia ? editTelegramMessageCaptionWithFallback : editTelegramMessageWithFallback;
+        const method = callbackCardIsMedia ? 'editMessageCaption' : 'editMessageText';
         const textField = callbackCardIsMedia ? 'caption' : 'text';
-        await editFn(baseUrl, {
+        await editTelegramCallbackCardFast(baseUrl, method, {
           chat_id: callbackChatId,
           message_id: callbackMessageId,
           [textField]: `${originalCleanText}\n\n${bodyText}`,
@@ -433,10 +437,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       };
       callbackFailureReporter = updateCallbackStatus;
       try {
-        if (callbackChatId && callbackMessageId) {
-          await updateCallbackStatus('⏳ Đang xử lý lựa chọn...', 'callback ack');
-        }
-
         const logRes = await p.query('SELECT * FROM workflow_logs WHERE id = $1', [logId]);
         if (logRes.rows.length === 0) {
           await updateCallbackStatus('❌ Không tìm thấy workflow log để xử lý.', 'callback missing log');
@@ -452,7 +452,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
         if (action === 'appr_agree') {
           if (log.status !== 'pending') {
-            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale approval');
             return;
           }
 
@@ -485,34 +484,35 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               step: 'approval',
             });
           }
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+          const originalMsgIds: number[] = log.original_chat_id
+            ? (typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+              : [Number(log.original_msg_id)].filter(Boolean))
+            : [];
+          await updateCallbackStatus(`✅ ${approvalDecisionText || 'Đã đồng ý'}`, 'callback approval immediate');
+          runCallbackSideEffects(`approval ${logId}`, async () => {
+            await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `✅ ${approvalDecisionText}`);
+          });
+          queueTelegramReactions(baseUrl, log.original_chat_id, originalMsgIds, 'approved source message', '❤');
           return;
 
         } else if (action === 'appr_disagree') {
           if (log.status !== 'pending') {
-            await updateCallbackStatus('⚠️ Lựa chọn này đã được xử lý trước đó.', 'callback stale reject');
             return;
           }
 
-          await p.query("UPDATE workflow_logs SET status = 'rejected' WHERE id = $1", [logId]);
+          const apprRejectClaim = await p.query(
+            "UPDATE workflow_logs SET status = 'rejected' WHERE id = $1 AND status = 'pending' RETURNING id",
+            [logId]
+          );
+          if (apprRejectClaim.rows.length === 0) {
+            return;
+          }
           const sourceThreadId = normalizeThreadId(log.original_thread_id);
           const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, sourceThreadId);
           const rejectTopicConfig = resolveRejectTopicConfig(autoSetup, sourceThreadId);
           const approvalDecisionText = formatApprovalDecisionMessage(approvalTopicConfig.approvalActionConfig.disagreeResultMessage, userFullName, log.original_text || '');
           const headerText = buildApprovalHeaderText(autoSetup, log);
-
-          // Delete original source message(s) so other group members can't see it
-          if (log.original_chat_id) {
-            const originalMsgIds: number[] = typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
-              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
-              : [Number(log.original_msg_id)];
-            for (const msgId of originalMsgIds) {
-              await deleteTelegramMessage(baseUrl, {
-                chat_id: log.original_chat_id,
-                message_id: msgId,
-              }, 'rejected source message');
-            }
-          }
 
           // Send reject notification
           const rejectTarget = resolveApprovalRejectTarget(autoSetup);
@@ -533,13 +533,28 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
             log.original_sender_name || '',
             log.original_text || ''
           );
-          await sendDividerMessageIfNeeded(baseUrl, rejectTarget.groupId, rejectTarget.threadId || undefined, 'reject notice');
-          await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: rejectTarget.groupId,
-            message_thread_id: rejectTarget.threadId || undefined,
-            text: rejectText,
-          }, 'reject notice');
-          await appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`);
+          const originalMsgIds: number[] = log.original_chat_id
+            ? (typeof log.original_msg_ids === 'string' && log.original_msg_ids.trim()
+              ? log.original_msg_ids.split(',').map(Number).filter(Boolean)
+              : [Number(log.original_msg_id)].filter(Boolean))
+            : [];
+
+          await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
+          runCallbackSideEffects(`rejection ${logId}`, async () => {
+            const results = await Promise.allSettled([
+              sendTelegramMessageWithFallback(baseUrl, {
+                chat_id: rejectTarget.groupId,
+                message_thread_id: rejectTarget.threadId || undefined,
+                text: rejectText,
+              }, 'reject notice'),
+              appendApprovalStatusLine(p, baseUrl, log, autoSetup.approvalGroupId, headerText, `❌ ${approvalDecisionText}`),
+            ]);
+            const rejectedResult = results.find((result) => result.status === 'rejected');
+            if (rejectedResult?.status === 'rejected') {
+              throw rejectedResult.reason;
+            }
+          });
+          queueTelegramReactions(baseUrl, log.original_chat_id, originalMsgIds, 'rejected source message', '👎');
 
         }
       } finally {
@@ -568,16 +583,20 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
       );
       if (sourceReplyLogRes.rows.length === 0) return false;
 
+      // Material requests use replies to the original source message as the
+      // acceptance signal. Once that flow is ready for, or has completed,
+      // acceptance, let the delivery-reply handler below own the reply instead
+      // of superseding it and creating a brand-new approval request.
+      const belongsToAcceptanceFlow = sourceReplyLogRes.rows.some((log: any) =>
+        log.status === 'supply_agreed' || log.status === 'completed'
+      );
+      if (belongsToAcceptanceFlow) {
+        return false;
+      }
+
       for (const log of sourceReplyLogRes.rows) {
         const autoSetup = await loadAutomationSetup(log.automation_id);
         if (!autoSetup) continue;
-
-        const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
-        const refreshEnabled = approvalTopicConfig.approvalActionConfig.refreshOnSourceReply === true
-          || approvalTopicConfig.approvalActionConfig.attendanceSupplementReplyEnabled === true;
-        if (!refreshEnabled) {
-          continue;
-        }
 
         const replyRefreshScope = matchesSourceReplyRefreshScope(chatId, replyThreadId, autoSetup, log);
         if (!replyRefreshScope.matched) {
@@ -635,7 +654,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           }
         }
 
-        if (!options.isEdit && approvalTopicConfig.approvalActionConfig.deleteSourceMessageOnReply === true) {
+        if (!options.isEdit) {
           await deleteTelegramMessage(baseUrl, {
             chat_id: msg.chat.id,
             message_id: sourceMsgId,
@@ -720,7 +739,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           replyHandled = true;
 
           const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
-          const replyText = msg.text || '';
+          const replyText = msg.text || msg.caption || '';
           if (!autoSetup.finalGroupId) {
             console.warn(`[BotListener] Final group is not configured for automation: ${log.automation_id}. Cannot send acceptance completion notification.`);
             emitListenerLog('error', `Chưa cấu hình nhóm nghiệm thu cuối cho automation ${log.automation_id}.`, {
@@ -742,24 +761,71 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const finalSameChatAsApproval = normalizeComparableChatId(autoSetup.finalGroupId) === normalizeComparableChatId(autoSetup.approvalGroupId);
           const finalHeader = finalSameChatAsApproval
             ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*`
-            : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
-          await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
-          await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: autoSetup.finalGroupId,
-            message_thread_id: autoSetup.finalThreadId || undefined,
-            text: finalHeader,
-            reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
-          }, 'final header');
-
-          const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
+            : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*.`);
+          const finalContentMethod = 'copyMessage';
           const finalRelayMsgIds = forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0 ? forcedAlbumMsgIds : [msg.message_id];
-          await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
-            chat_id: autoSetup.finalGroupId,
-            message_thread_id: autoSetup.finalThreadId || undefined,
-            from_chat_id: msg.chat.id,
-            message_id: finalRelayMsgIds[0],
-            message_ids: finalRelayMsgIds,
-          }, 'final relay content');
+          const acceptanceHasMedia = Boolean(
+            forcedAlbumMsgIds?.length || msg.photo || msg.document || msg.video || msg.animation || msg.audio
+          );
+
+          if (acceptanceHasMedia) {
+            const mediaCaption = buildAcceptanceMediaCaption(finalHeader, replyText);
+            if (finalRelayMsgIds.length > 1) {
+              const albumMedia = buildTelegramMediaGroup(forcedAlbumMessages || [], mediaCaption);
+              if (albumMedia.length === finalRelayMsgIds.length) {
+                const albumResult = await sendTelegramJson(baseUrl, 'sendMediaGroup', {
+                  chat_id: autoSetup.finalGroupId,
+                  message_thread_id: autoSetup.finalThreadId || undefined,
+                  media: albumMedia,
+                  reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                    ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                    : undefined,
+                });
+                if (!albumResult.ok) {
+                  await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                    chat_id: autoSetup.finalGroupId,
+                    message_thread_id: autoSetup.finalThreadId || undefined,
+                    from_chat_id: msg.chat.id,
+                    message_ids: finalRelayMsgIds,
+                  }, 'final acceptance album fallback');
+                }
+              } else {
+                await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                  chat_id: autoSetup.finalGroupId,
+                  message_thread_id: autoSetup.finalThreadId || undefined,
+                  from_chat_id: msg.chat.id,
+                  message_ids: finalRelayMsgIds,
+                }, 'final acceptance album fallback');
+              }
+            } else {
+              await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                chat_id: autoSetup.finalGroupId,
+                message_thread_id: autoSetup.finalThreadId || undefined,
+                from_chat_id: msg.chat.id,
+                message_id: finalRelayMsgIds[0],
+                caption: mediaCaption,
+                reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                  ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                  : undefined,
+              }, 'final acceptance media');
+            }
+          } else {
+            await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
+            await sendTelegramMessageWithFallback(baseUrl, {
+              chat_id: autoSetup.finalGroupId,
+              message_thread_id: autoSetup.finalThreadId || undefined,
+              text: finalHeader,
+              reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                : undefined,
+            }, 'final header');
+            await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
+              chat_id: autoSetup.finalGroupId,
+              message_thread_id: autoSetup.finalThreadId || undefined,
+              from_chat_id: msg.chat.id,
+              message_id: finalRelayMsgIds[0],
+            }, 'final relay content');
+          }
 
           console.log(`[BotListener] Workflow log ${log.id} successfully completed & notified!`);
         }
@@ -1573,6 +1639,44 @@ function withProjectTag(originalText: string, body: string): string {
   return tag ? `🏗️ *${tag}*\n${body}` : body;
 }
 
+function buildAcceptanceMediaCaption(header: string, replyText: string): string {
+  const plainHeader = header.replaceAll('*', '').trim();
+  const cleanReply = replyText.trim();
+  const caption = cleanReply ? `${plainHeader}\n\n${cleanReply}` : plainHeader;
+
+  // Telegram limits media captions to 1024 characters. Keep a small margin
+  // for multi-byte characters and avoid losing the acceptance label.
+  return caption.length > 1000 ? `${caption.slice(0, 997)}...` : caption;
+}
+
+function buildTelegramMediaGroup(messages: any[], caption: string): Array<Record<string, unknown>> {
+  return messages.flatMap((message: any, index: number) => {
+    let type: 'photo' | 'video' | 'document' | 'audio' | null = null;
+    let media = '';
+
+    if (Array.isArray(message?.photo) && message.photo.length > 0) {
+      type = 'photo';
+      media = String(message.photo[message.photo.length - 1]?.file_id || '');
+    } else if (message?.video?.file_id) {
+      type = 'video';
+      media = String(message.video.file_id);
+    } else if (message?.document?.file_id) {
+      type = 'document';
+      media = String(message.document.file_id);
+    } else if (message?.audio?.file_id) {
+      type = 'audio';
+      media = String(message.audio.file_id);
+    }
+
+    if (!type || !media) return [];
+    return [{
+      type,
+      media,
+      caption: index === 0 ? caption : undefined,
+    }];
+  });
+}
+
 // Build the fixed "header" portion (project tag + custom approval message) of
 // the single status message tracked per request, so it can be recomputed
 // identically every time the status block is appended to.
@@ -1841,9 +1945,33 @@ function formatSourceReplyRefreshText(
   replyText: string,
   senderFullName: string
 ): string {
-  const originalBlock = originalText?.trim() ? originalText.trim() : '[Không có nội dung cũ]';
+  const history = extractSourceReplyHistory(originalText);
   const replyBlock = replyText?.trim() ? replyText.trim() : '[Hình ảnh/Tài liệu]';
-  return `Yêu cầu cũ:\n${originalBlock}\n\nCập nhật mới từ ${senderFullName}:\n${replyBlock}`;
+  const historyBlock = history
+    .map((content, index) => `Yêu cầu cũ lần ${index + 1}:\n${content}`)
+    .join('\n\n');
+  return `${historyBlock}\n\nCập nhật mới từ ${senderFullName}:\n${replyBlock}`;
+}
+
+function extractSourceReplyHistory(originalText: string): string[] {
+  const normalized = originalText?.trim() || '[Không có nội dung cũ]';
+  const headerPattern = /(?:^|\n+)(?:Yêu cầu cũ(?: lần \d+)?|Cập nhật mới từ [^:\n]+):\n/g;
+  const matches = Array.from(normalized.matchAll(headerPattern));
+  if (matches.length === 0) return [normalized];
+
+  const history: string[] = [];
+  const preamble = normalized.slice(0, matches[0].index).trim();
+  if (preamble) history.push(preamble);
+
+  matches.forEach((match, index) => {
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : normalized.length;
+    const content = normalized.slice(start, end).trim();
+    // Legacy nested output can contain several consecutive empty "Yêu cầu cũ" headers.
+    if (content) history.push(content);
+  });
+
+  return history.length > 0 ? history : ['[Không có nội dung cũ]'];
 }
 
 function resolveSupplyListenScope(autoSetup: any): { groupId: string; threadIds: number[] } {
@@ -2064,6 +2192,69 @@ function getConfiguredSupplierRoutes(autoSetup: any): SupplierRoute[] {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function answerTelegramCallback(baseUrl: string, callbackQueryId: string, text: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    await fetch(`${baseUrl}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    const message = error?.name === 'AbortError'
+      ? 'request timeout after 3s'
+      : (error?.message || String(error));
+    console.warn(`[BotListener] Telegram answerCallbackQuery failed (non-fatal): ${message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function editTelegramCallbackCardFast(
+  baseUrl: string,
+  method: 'editMessageText' | 'editMessageCaption',
+  payload: Record<string, unknown>,
+  label: string
+): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
+  try {
+    const res = await fetch(`${baseUrl}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const data = await res.json() as any;
+    if (!data.ok) {
+      console.warn(`[BotListener] Fast callback edit failed (${label}): ${data.description || res.status}`);
+    }
+  } catch (error: any) {
+    const message = error?.name === 'AbortError'
+      ? 'request timeout after 3s'
+      : (error?.message || String(error));
+    console.warn(`[BotListener] Fast callback edit failed (${label}, non-fatal): ${message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function runCallbackSideEffects(label: string, task: () => Promise<void>): void {
+  void task().catch((error: any) => {
+    console.error(`[BotListener] Background callback side effects failed (${label}):`, error?.message || error);
+    emitListenerLog('error', `Tác vụ nền sau lựa chọn lỗi (${label}): ${error?.message || error}`, {
+      step: 'callback-background',
+    });
+  });
+}
+
 async function sendTelegramJson(
   baseUrl: string,
   method: string,
@@ -2255,6 +2446,37 @@ async function reactToTelegramMessage(
     console.warn(`[BotListener] Failed to react to ${label}: ${result.description || 'unknown error'}`);
   }
   return result;
+}
+
+function queueTelegramReactions(
+  baseUrl: string,
+  chatId: string | number,
+  messageIds: number[],
+  label: string,
+  emoji: string
+): void {
+  // Reaction is cosmetic feedback. Keep it completely detached from workflow
+  // state changes and notifications so Telegram reaction failures can never
+  // delay or fail the main workflow. Telegram connectivity on the VPS can be
+  // intermittent, so retry again later instead of exhausting every attempt
+  // within a few seconds of the approval callback.
+  void (async () => {
+    for (const messageId of messageIds) {
+      const retryDelays = [0, 15_000, 45_000, 90_000];
+      for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+        if (retryDelays[attempt] > 0) {
+          await delay(retryDelays[attempt]);
+        }
+        const result = await reactToTelegramMessage(baseUrl, chatId, messageId, label, emoji);
+        if (result.ok) break;
+        if (attempt < retryDelays.length - 1) {
+          console.warn(`[BotListener] Scheduling detached reaction retry ${attempt + 2}/${retryDelays.length} for ${label}.`);
+        }
+      }
+    }
+  })().catch((error: any) => {
+    console.warn(`[BotListener] Detached reaction job failed (${label}, non-fatal): ${error?.message || error}`);
+  });
 }
 
 // Remove any reaction the bot previously set on a message (used to signal "this
