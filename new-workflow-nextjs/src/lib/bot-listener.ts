@@ -738,7 +738,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           replyHandled = true;
 
           const senderFullName = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.from?.username || 'Thành viên';
-          const replyText = msg.text || '';
+          const replyText = msg.text || msg.caption || '';
           if (!autoSetup.finalGroupId) {
             console.warn(`[BotListener] Final group is not configured for automation: ${log.automation_id}. Cannot send acceptance completion notification.`);
             emitListenerLog('error', `Chưa cấu hình nhóm nghiệm thu cuối cho automation ${log.automation_id}.`, {
@@ -761,23 +761,54 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           const finalHeader = finalSameChatAsApproval
             ? `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*`
             : withProjectTag(log.original_text, `✅ *GHI NHẬN NGHIỆM THU VẬT TƯ*\n\nYêu cầu: "${log.original_text || '[Media]'}"\n\nĐã được xác nhận bởi *${senderFullName}*\nPhản hồi sẽ được chuyển tiếp bên dưới bằng chế độ *${autoSetup.finalMessageMode === 'copy' ? 'COPY' : 'FORWARD'}*.`);
-          await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
-          await sendTelegramMessageWithFallback(baseUrl, {
-            chat_id: autoSetup.finalGroupId,
-            message_thread_id: autoSetup.finalThreadId || undefined,
-            text: finalHeader,
-            reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
-          }, 'final header');
-
           const finalContentMethod: 'copyMessage' | 'forwardMessage' = autoSetup.finalMessageMode === 'copy' ? 'copyMessage' : 'forwardMessage';
           const finalRelayMsgIds = forcedAlbumMsgIds && forcedAlbumMsgIds.length > 0 ? forcedAlbumMsgIds : [msg.message_id];
-          await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
-            chat_id: autoSetup.finalGroupId,
-            message_thread_id: autoSetup.finalThreadId || undefined,
-            from_chat_id: msg.chat.id,
-            message_id: finalRelayMsgIds[0],
-            message_ids: finalRelayMsgIds,
-          }, 'final relay content');
+          const acceptanceHasMedia = Boolean(
+            forcedAlbumMsgIds?.length || msg.photo || msg.document || msg.video || msg.animation || msg.audio
+          );
+
+          if (acceptanceHasMedia) {
+            const mediaCaption = buildAcceptanceMediaCaption(finalHeader, replyText);
+            if (finalRelayMsgIds.length > 1) {
+              const relayResult = await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                chat_id: autoSetup.finalGroupId,
+                message_thread_id: autoSetup.finalThreadId || undefined,
+                from_chat_id: msg.chat.id,
+                message_ids: finalRelayMsgIds,
+              }, 'final acceptance album');
+              const firstCopiedMessageId = extractFirstTelegramMessageId(relayResult.result);
+              if (relayResult.ok && firstCopiedMessageId) {
+                await editTelegramMessageCaptionWithFallback(baseUrl, {
+                  chat_id: autoSetup.finalGroupId,
+                  message_id: firstCopiedMessageId,
+                  caption: mediaCaption,
+                }, 'final acceptance album caption');
+              }
+            } else {
+              await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                chat_id: autoSetup.finalGroupId,
+                message_thread_id: autoSetup.finalThreadId || undefined,
+                from_chat_id: msg.chat.id,
+                message_id: finalRelayMsgIds[0],
+                caption: mediaCaption,
+                reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
+              }, 'final acceptance media');
+            }
+          } else {
+            await sendDividerMessageIfNeeded(baseUrl, autoSetup.finalGroupId, autoSetup.finalThreadId || undefined, 'final header');
+            await sendTelegramMessageWithFallback(baseUrl, {
+              chat_id: autoSetup.finalGroupId,
+              message_thread_id: autoSetup.finalThreadId || undefined,
+              text: finalHeader,
+              reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
+            }, 'final header');
+            await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
+              chat_id: autoSetup.finalGroupId,
+              message_thread_id: autoSetup.finalThreadId || undefined,
+              from_chat_id: msg.chat.id,
+              message_id: finalRelayMsgIds[0],
+            }, 'final relay content');
+          }
 
           console.log(`[BotListener] Workflow log ${log.id} successfully completed & notified!`);
         }
@@ -1589,6 +1620,22 @@ function extractProjectTag(text: string): string {
 function withProjectTag(originalText: string, body: string): string {
   const tag = extractProjectTag(originalText);
   return tag ? `🏗️ *${tag}*\n${body}` : body;
+}
+
+function buildAcceptanceMediaCaption(header: string, replyText: string): string {
+  const plainHeader = header.replaceAll('*', '').trim();
+  const cleanReply = replyText.trim();
+  const caption = cleanReply ? `${plainHeader}\n\n${cleanReply}` : plainHeader;
+
+  // Telegram limits media captions to 1024 characters. Keep a small margin
+  // for multi-byte characters and avoid losing the acceptance label.
+  return caption.length > 1000 ? `${caption.slice(0, 997)}...` : caption;
+}
+
+function extractFirstTelegramMessageId(result: any): number | null {
+  const firstResult = Array.isArray(result) ? result[0] : result;
+  const messageId = Number(firstResult?.message_id);
+  return Number.isInteger(messageId) && messageId > 0 ? messageId : null;
 }
 
 // Build the fixed "header" portion (project tag + custom approval message) of
