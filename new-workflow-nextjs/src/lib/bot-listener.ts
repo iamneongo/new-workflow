@@ -564,6 +564,59 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
     let replyHandled = false;
 
+    const handleReplyToRejectedRequest = async (msg: any, repliedMessageId: number): Promise<boolean> => {
+      const chatId = msg.chat.id.toString();
+      const replyThreadId = normalizeThreadId(msg.message_thread_id);
+      const relatedLogsRes = await p.query(
+        `SELECT * FROM workflow_logs
+         WHERE original_msg_id = $1 OR thread_root_msg_id = $1 OR delivery_msg_id = $1
+         ORDER BY id DESC`,
+        [repliedMessageId]
+      );
+
+      for (const log of relatedLogsRes.rows) {
+        const autoSetup = await loadAutomationSetup(log.automation_id);
+        if (!autoSetup) continue;
+
+        const isSourceReply = Number(log.original_msg_id) === Number(repliedMessageId)
+          || Number(log.thread_root_msg_id) === Number(repliedMessageId);
+        const isDeliveryReply = Number(log.delivery_msg_id) === Number(repliedMessageId);
+        const scopeMatches = isSourceReply
+          ? matchesSourceReplyRefreshScope(chatId, replyThreadId, autoSetup, log).matched
+          : isDeliveryReply && matchesDeliveryReplyScope(chatId, autoSetup, log);
+        if (!scopeMatches) continue;
+
+        // The newest matching workflow owns this reply. Older rejected logs in
+        // the same thread must not block a newer active request.
+        if (log.status !== 'rejected') {
+          return false;
+        }
+
+        runCallbackSideEffects(`rejected request reply ${log.id}`, async () => {
+          await sendTelegramMessageWithFallback(baseUrl, {
+            chat_id: msg.chat.id,
+            message_thread_id: msg.message_thread_id || undefined,
+            reply_to_message_id: msg.message_id,
+            text: '⛔ Yêu cầu này trước đó đã bị từ chối.',
+          }, 'rejected request reply notice');
+        });
+        emitListenerLog('warn', `Chặn reply cho workflow #${log.id} vì yêu cầu đã bị từ chối.`, {
+          automationId: log.automation_id,
+          step: 'rejected-reply',
+        });
+        return true;
+      }
+
+      return false;
+    };
+
+    if (update.message && update.message.reply_to_message && !replyHandled) {
+      replyHandled = await handleReplyToRejectedRequest(
+        update.message,
+        update.message.reply_to_message.message_id
+      );
+    }
+
     // Helper: re-process a source message (either an explicit reply to it, or the
     // message itself after being edited in place) by superseding the previous
     // workflow log/approval prompt and regenerating it from the new content.
