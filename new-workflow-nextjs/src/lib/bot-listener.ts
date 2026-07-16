@@ -651,13 +651,6 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[], forced
         const autoSetup = await loadAutomationSetup(log.automation_id);
         if (!autoSetup) continue;
 
-        const approvalTopicConfig = resolveApprovalTopicConfig(autoSetup, normalizeThreadId(log.original_thread_id));
-        const refreshEnabled = approvalTopicConfig.approvalActionConfig.refreshOnSourceReply === true
-          || approvalTopicConfig.approvalActionConfig.attendanceSupplementReplyEnabled === true;
-        if (!refreshEnabled) {
-          continue;
-        }
-
         const replyRefreshScope = matchesSourceReplyRefreshScope(chatId, replyThreadId, autoSetup, log);
         if (!replyRefreshScope.matched) {
           continue;
@@ -714,7 +707,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[], forced
           }
         }
 
-        if (!options.isEdit && approvalTopicConfig.approvalActionConfig.deleteSourceMessageOnReply === true) {
+        if (!options.isEdit) {
           await deleteTelegramMessage(baseUrl, {
             chat_id: msg.chat.id,
             message_id: sourceMsgId,
