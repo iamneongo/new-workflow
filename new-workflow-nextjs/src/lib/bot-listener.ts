@@ -552,15 +552,16 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
 
           await updateCallbackStatus(`❌ ${approvalDecisionText || 'Đã không đồng ý'}`, 'callback rejection immediate');
           runCallbackSideEffects(`rejection ${logId}`, async () => {
-            const unreactJobs = originalMsgIds.map((msgId) => unreactTelegramMessage(
+            const dislikeJobs = originalMsgIds.map((msgId) => reactToTelegramMessage(
               baseUrl,
               log.original_chat_id,
               msgId,
-              'rejected source message'
+              'rejected source message',
+              '👎'
             ));
 
             const results = await Promise.allSettled([
-              ...unreactJobs,
+              ...dislikeJobs,
               sendTelegramMessageWithFallback(baseUrl, {
                 chat_id: rejectTarget.groupId,
                 message_thread_id: rejectTarget.threadId || undefined,
