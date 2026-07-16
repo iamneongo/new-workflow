@@ -334,7 +334,7 @@ async function pollUpdates() {
   }
 }
 
-async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
+async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[], forcedAlbumMessages?: any[]) {
   // Dedup: skip if this update_id has already been processed (prevents polling retry duplicates).
   // Skipped for the synthetic re-dispatch of a buffered reply album (forcedAlbumMsgIds set below).
   const updateId: number = update.update_id;
@@ -371,7 +371,7 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
         const sortedUpdates = buf.updates.sort((a: any, b: any) => Number(a.message.message_id) - Number(b.message.message_id));
         const representative = sortedUpdates.find((u: any) => u.message.text || u.message.caption) || sortedUpdates[0];
         const allIds = sortedUpdates.map((u: any) => Number(u.message.message_id));
-        void handleBotUpdate(representative, allIds).catch((err: any) => {
+        void handleBotUpdate(representative, allIds, sortedUpdates.map((item: any) => item.message)).catch((err: any) => {
           console.error('[BotListener] Unhandled buffered reply album error:', err?.message || err);
         });
       }, 3000);
@@ -831,19 +831,31 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
           if (acceptanceHasMedia) {
             const mediaCaption = buildAcceptanceMediaCaption(finalHeader, replyText);
             if (finalRelayMsgIds.length > 1) {
-              const relayResult = await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
-                chat_id: autoSetup.finalGroupId,
-                message_thread_id: autoSetup.finalThreadId || undefined,
-                from_chat_id: msg.chat.id,
-                message_ids: finalRelayMsgIds,
-              }, 'final acceptance album');
-              const firstCopiedMessageId = extractFirstTelegramMessageId(relayResult.result);
-              if (relayResult.ok && firstCopiedMessageId) {
-                await editTelegramMessageCaptionWithFallback(baseUrl, {
+              const albumMedia = buildTelegramMediaGroup(forcedAlbumMessages || [], mediaCaption);
+              if (albumMedia.length === finalRelayMsgIds.length) {
+                const albumResult = await sendTelegramJson(baseUrl, 'sendMediaGroup', {
                   chat_id: autoSetup.finalGroupId,
-                  message_id: firstCopiedMessageId,
-                  caption: mediaCaption,
-                }, 'final acceptance album caption');
+                  message_thread_id: autoSetup.finalThreadId || undefined,
+                  media: albumMedia,
+                  reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                    ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                    : undefined,
+                });
+                if (!albumResult.ok) {
+                  await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                    chat_id: autoSetup.finalGroupId,
+                    message_thread_id: autoSetup.finalThreadId || undefined,
+                    from_chat_id: msg.chat.id,
+                    message_ids: finalRelayMsgIds,
+                  }, 'final acceptance album fallback');
+                }
+              } else {
+                await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
+                  chat_id: autoSetup.finalGroupId,
+                  message_thread_id: autoSetup.finalThreadId || undefined,
+                  from_chat_id: msg.chat.id,
+                  message_ids: finalRelayMsgIds,
+                }, 'final acceptance album fallback');
               }
             } else {
               await sendTelegramMethodWithFallback(baseUrl, 'copyMessage', {
@@ -852,7 +864,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
                 from_chat_id: msg.chat.id,
                 message_id: finalRelayMsgIds[0],
                 caption: mediaCaption,
-                reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
+                reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                  ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                  : undefined,
               }, 'final acceptance media');
             }
           } else {
@@ -861,7 +875,9 @@ async function handleBotUpdate(update: any, forcedAlbumMsgIds?: number[]) {
               chat_id: autoSetup.finalGroupId,
               message_thread_id: autoSetup.finalThreadId || undefined,
               text: finalHeader,
-              reply_to_message_id: finalSameChatAsApproval && log.approval_msg_id ? log.approval_msg_id : undefined,
+              reply_parameters: finalSameChatAsApproval && log.approval_msg_id
+                ? { message_id: log.approval_msg_id, allow_sending_without_reply: true }
+                : undefined,
             }, 'final header');
             await sendTelegramMethodWithFallback(baseUrl, finalContentMethod, {
               chat_id: autoSetup.finalGroupId,
@@ -1693,10 +1709,32 @@ function buildAcceptanceMediaCaption(header: string, replyText: string): string 
   return caption.length > 1000 ? `${caption.slice(0, 997)}...` : caption;
 }
 
-function extractFirstTelegramMessageId(result: any): number | null {
-  const firstResult = Array.isArray(result) ? result[0] : result;
-  const messageId = Number(firstResult?.message_id);
-  return Number.isInteger(messageId) && messageId > 0 ? messageId : null;
+function buildTelegramMediaGroup(messages: any[], caption: string): Array<Record<string, unknown>> {
+  return messages.flatMap((message: any, index: number) => {
+    let type: 'photo' | 'video' | 'document' | 'audio' | null = null;
+    let media = '';
+
+    if (Array.isArray(message?.photo) && message.photo.length > 0) {
+      type = 'photo';
+      media = String(message.photo[message.photo.length - 1]?.file_id || '');
+    } else if (message?.video?.file_id) {
+      type = 'video';
+      media = String(message.video.file_id);
+    } else if (message?.document?.file_id) {
+      type = 'document';
+      media = String(message.document.file_id);
+    } else if (message?.audio?.file_id) {
+      type = 'audio';
+      media = String(message.audio.file_id);
+    }
+
+    if (!type || !media) return [];
+    return [{
+      type,
+      media,
+      caption: index === 0 ? caption : undefined,
+    }];
+  });
 }
 
 // Build the fixed "header" portion (project tag + custom approval message) of
